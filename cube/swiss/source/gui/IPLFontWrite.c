@@ -93,10 +93,19 @@ void drawFontInit(void)
 	GX_SetCullMode (GX_CULL_NONE);
 }
 
+// Soft drop shadow so text stays readable over the glass panels
+static bool shadowPass = false;
+#define SHADOW_COLOR(c) ((GXColor) {0, 0, 16, (u8)((c).a * 3 / 5)})
+
 void drawString(int x, int y, const char *string, float scale, int align, GXColor fontColor)
 {
 	if(string == NULL) {
 		return;
+	}
+	if(!shadowPass && fontColor.a) {
+		shadowPass = true;
+		drawString(x + 1, y + 2, string, scale, align, SHADOW_COLOR(fontColor));
+		shadowPass = false;
 	}
 	drawFontInit();
 	Mtx GXmodelView2D;
@@ -150,6 +159,11 @@ void drawStringWithCaret(int x, int y, const char *string, float scale, int alig
 {
 	if(string == NULL) {
 		string = "";
+	}
+	if(!shadowPass && fontColor.a) {
+		shadowPass = true;
+		drawStringWithCaret(x + 1, y + 2, string, scale, align, SHADOW_COLOR(fontColor), caretPosition, SHADOW_COLOR(caretColor));
+		shadowPass = false;
 	}
 	drawFontInit();
 	Mtx GXmodelView2D;
@@ -233,6 +247,11 @@ void drawStringEllipsis(int x, int y, const char *string, float scale, int align
 {
 	if(string == NULL) {
 		return;
+	}
+	if(!shadowPass && fontColor.a) {
+		shadowPass = true;
+		drawStringEllipsis(x + 1, y + 2, string, scale, align, SHADOW_COLOR(fontColor), rotateVertical, maxSize);
+		shadowPass = false;
 	}
 	drawFontInit();
 	Mtx GXmodelView2D;

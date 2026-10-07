@@ -15,11 +15,11 @@
 #define THEME_BG_TOP        ((GXColor) { 28,  22,  74, 255})
 #define THEME_BG_MID        ((GXColor) { 14,  11,  44, 255})
 #define THEME_BG_BOTTOM     ((GXColor) {  5,   4,  18, 255})
-#define THEME_PANEL         ((GXColor) { 16,  12,  48, 200})
-#define THEME_PANEL_DARK    ((GXColor) {  8,   6,  26, 225})
-#define THEME_BORDER        ((GXColor) {150, 140, 255, 225})
-#define THEME_BORDER_DIM    ((GXColor) { 92,  84, 170, 200})
-#define THEME_SELECT        ((GXColor) { 92,  70, 214, 225})
+#define THEME_PANEL         ((GXColor) { 46,  38, 120, 150})
+#define THEME_PANEL_DARK    ((GXColor) { 22,  18,  64, 185})
+#define THEME_BORDER        ((GXColor) {196, 188, 255, 235})
+#define THEME_BORDER_DIM    ((GXColor) {120, 110, 210, 190})
+#define THEME_SELECT        ((GXColor) {112,  88, 240, 200})
 #define THEME_ACCENT        ((GXColor) {124, 104, 255, 255})
 #define THEME_PROGRESS      ((GXColor) {136, 112, 255, 225})
 #define THEME_PROGRESS_IND  ((GXColor) {170, 210, 255, 225})
@@ -53,6 +53,8 @@ void Scene3D_DrawCubes(cube3d_t *cubes, int count);
 void Scene3D_DrawLogoCube(float x, float y, float size, float alpha);
 void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float alpha);
 void Scene3D_DrawGlow(GXTexObj *texObj, float x, float y, float z, float w, float h, GXColor color);
+void Scene3D_DrawReflections(const cube3d_t *cubes, int count, float floorY, float strength);
+GXTexObj *Scene3D_GlowTexture(void);
 void Scene3D_DrawGradientRect(float x, float y, float w, float h, GXColor top, GXColor bottom);
 
 #endif

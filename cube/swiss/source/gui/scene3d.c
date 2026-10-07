@@ -41,6 +41,23 @@ static const GXColor bgPalette[] = {
 	{ 46, 120, 220, 0},
 };
 
+#define BOKEH_ORBS 14
+static struct {
+	float x, y, z, size;
+	float vx, vy, phase;
+	GXColor color;
+} bokeh[BOKEH_ORBS];
+
+static const GXColor bokehPalette[] = {
+	{150, 130, 255, 0},
+	{ 90, 160, 255, 0},
+	{220, 120, 255, 0},
+	{120, 220, 255, 0},
+};
+
+static u8 glowData[64 * 64] ATTRIBUTE_ALIGN(32);
+static GXTexObj glowTex;
+
 static u32 rngState = 0x5715EC0B;
 static float frand(void)
 {
@@ -72,6 +89,34 @@ void Scene3D_Init(void)
 		bgCubes[i].color = bgPalette[i % (sizeof(bgPalette) / sizeof(bgPalette[0]))];
 		bgCubes[i].color.a = 40 + (u8)(frand() * 60.0f);
 	}
+
+	for (int i = 0; i < BOKEH_ORBS; i++) {
+		bokeh[i].z     = i < BOKEH_ORBS - 3 ? -300.0f - frand() * 1400.0f : 80.0f + frand() * 150.0f;
+		bokeh[i].x     = frand() * 640.0f;
+		bokeh[i].y     = frand() * 480.0f;
+		bokeh[i].size  = 60.0f + frand() * 200.0f;
+		bokeh[i].vx    = (frand() - 0.5f) * 14.0f;
+		bokeh[i].vy    = (frand() - 0.5f) * 8.0f;
+		bokeh[i].phase = frand() * 6.28f;
+		bokeh[i].color = bokehPalette[i % (sizeof(bokehPalette) / sizeof(bokehPalette[0]))];
+	}
+
+	// Soft radial falloff stored as I8 in GX 8x4 tiles
+	for (int y = 0; y < 64; y++) {
+		for (int x = 0; x < 64; x++) {
+			float dx = (x - 31.5f) / 32.0f, dy = (y - 31.5f) / 32.0f;
+			float d = 1.0f - sqrtf(dx * dx + dy * dy);
+			int tile = (y / 4) * 8 + (x / 8);
+			glowData[tile * 32 + (y % 4) * 8 + (x % 8)] = (u8)(d <= 0.0f ? 0 : d * d * 255.0f);
+		}
+	}
+	DCFlushRange(glowData, sizeof(glowData));
+	GX_InitTexObj(&glowTex, glowData, 64, 64, GX_TF_I8, GX_CLAMP, GX_CLAMP, GX_FALSE);
+}
+
+GXTexObj *Scene3D_GlowTexture(void)
+{
+	return &glowTex;
 }
 
 float Scene3D_Time(void)
@@ -363,12 +408,22 @@ static void drawCube(const cube3d_t *c)
 	for (int i = 0; i < 6; i++) {
 		int f = order[i];
 		bool back = i < 3;
-		u8 a = back ? c->color.a / 2 : c->color.a;
+		// Glass: faces seen edge-on are brighter and more opaque than faces seen head-on
+		const float *n = faceNormal[f];
+		float ny = rot[1][0] * n[0] + rot[1][1] * n[1] + rot[1][2] * n[2];
+		float nz = rot[2][0] * n[0] + rot[2][1] * n[1] + rot[2][2] * n[2];
+		float fresnel = 1.0f - fabsf(nz);
+		float whiten = 0.15f + 0.45f * fresnel * fresnel + (ny > 0.6f ? 0.18f : 0.0f);
+		float alpha = c->color.a * (0.55f + 0.7f * fresnel) * (back ? 0.5f : 1.0f);
+		if (alpha > 255.0f) alpha = 255.0f;
+		u8 r = (u8)(c->color.r + (255 - c->color.r) * whiten);
+		u8 g = (u8)(c->color.g + (255 - c->color.g) * whiten);
+		u8 b = (u8)(c->color.b + (255 - c->color.b) * whiten);
 		GX_Begin(GX_QUADS, VTXFMT_LIT, 4);
 		for (int v = 0; v < 4; v++) {
 			GX_Position3f32(faceVerts[f][v][0], faceVerts[f][v][1], faceVerts[f][v][2]);
-			GX_Normal3f32(faceNormal[f][0], faceNormal[f][1], faceNormal[f][2]);
-			GX_Color4u8(c->color.r, c->color.g, c->color.b, a);
+			GX_Normal3f32(n[0], n[1], n[2]);
+			GX_Color4u8(r, g, b, (u8)alpha);
 		}
 		GX_End();
 	}
@@ -376,25 +431,31 @@ static void drawCube(const cube3d_t *c)
 	if (c->edges > 0.0f) {
 		setupColorPipeline(false);
 		GX_LoadPosMtxImm(mv, GX_PNMTX0);
-		GX_SetLineWidth(12, GX_TO_ZERO);
+		GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
 		float centreZ = mv[2][3];
-		GX_Begin(GX_LINES, VTXFMT_LIT, 24);
-		for (int e = 0; e < 12; e++) {
-			float a[3], b[3];
-			cornerOf(edgeList[e][0], a);
-			cornerOf(edgeList[e][1], b);
-			float mid[3] = {(a[0] + b[0]) * .5f, (a[1] + b[1]) * .5f, (a[2] + b[2]) * .5f};
-			float front = mtxZ(mv, mid) >= centreZ ? 1.0f : 0.35f;
-			u8 alpha = (u8)(c->edges * front * c->color.a);
-			u8 r = (u8)((255 + c->color.r) / 2), g = (u8)((255 + c->color.g) / 2), bl = (u8)((255 + c->color.b) / 2);
-			GX_Position3f32(a[0], a[1], a[2]);
-			GX_Normal3f32(0, 0, 1);
-			GX_Color4u8(r, g, bl, alpha);
-			GX_Position3f32(b[0], b[1], b[2]);
-			GX_Normal3f32(0, 0, 1);
-			GX_Color4u8(r, g, bl, alpha);
+		for (int pass = 0; pass < 2; pass++) {
+			// A wide faint line underneath a thin bright one reads as a glowing edge
+			GX_SetLineWidth(pass ? 9 : 36, GX_TO_ZERO);
+			float strength = pass ? 1.0f : 0.25f;
+			GX_Begin(GX_LINES, VTXFMT_LIT, 24);
+			for (int e = 0; e < 12; e++) {
+				float a[3], b[3];
+				cornerOf(edgeList[e][0], a);
+				cornerOf(edgeList[e][1], b);
+				float mid[3] = {(a[0] + b[0]) * .5f, (a[1] + b[1]) * .5f, (a[2] + b[2]) * .5f};
+				float front = mtxZ(mv, mid) >= centreZ ? 1.0f : 0.35f;
+				float alpha = c->edges * front * strength * c->color.a * 1.4f;
+				u8 al = (u8)(alpha > 255.0f ? 255.0f : alpha);
+				u8 r = (u8)((3 * 255 + c->color.r) / 4), g = (u8)((3 * 255 + c->color.g) / 4), bl = (u8)((3 * 255 + c->color.b) / 4);
+				GX_Position3f32(a[0], a[1], a[2]);
+				GX_Normal3f32(0, 0, 1);
+				GX_Color4u8(r, g, bl, al);
+				GX_Position3f32(b[0], b[1], b[2]);
+				GX_Normal3f32(0, 0, 1);
+				GX_Color4u8(r, g, bl, al);
+			}
+			GX_End();
 		}
-		GX_End();
 	}
 }
 
@@ -462,7 +523,40 @@ void Scene3D_DrawBackground(void)
 		cubes[i].color = bgCubes[i].color;
 		cubes[i].edges = 0.6f;
 	}
-	Scene3D_DrawCubes(cubes, BG_CUBES);
+	// Out of focus light orbs, most behind the cubes and a few drifting in front
+	for (int i = 0; i < BOKEH_ORBS; i++) {
+		bokeh[i].x += bokeh[i].vx * dt;
+		bokeh[i].y += bokeh[i].vy * dt;
+		if (bokeh[i].x < -150.0f) bokeh[i].x += 940.0f;
+		if (bokeh[i].x > 790.0f)  bokeh[i].x -= 940.0f;
+		if (bokeh[i].y < -150.0f) bokeh[i].y += 780.0f;
+		if (bokeh[i].y > 630.0f)  bokeh[i].y -= 780.0f;
+	}
+	for (int pass = 0; pass < 2; pass++) {
+		if (pass == 1) Scene3D_DrawCubes(cubes, BG_CUBES);
+		for (int i = 0; i < BOKEH_ORBS; i++) {
+			if ((bokeh[i].z > 0.0f) != (pass == 1)) continue;
+			float twinkle = 0.55f + 0.45f * sinf(t * 0.7f + bokeh[i].phase);
+			float k = (bokeh[i].z > 0.0f ? 0.14f : 0.30f) * twinkle;
+			GXColor c = {(u8)(bokeh[i].color.r * k), (u8)(bokeh[i].color.g * k), (u8)(bokeh[i].color.b * k), 255};
+			Scene3D_DrawGlow(&glowTex, bokeh[i].x, bokeh[i].y, bokeh[i].z, bokeh[i].size, bokeh[i].size, c);
+		}
+	}
+}
+
+void Scene3D_DrawReflections(const cube3d_t *cubes, int count, float floorY, float strength)
+{
+	// Mirroring the y axis in camera space flips the x and z rotations
+	cube3d_t mirrored[count];
+	for (int i = 0; i < count; i++) {
+		mirrored[i] = cubes[i];
+		mirrored[i].y = 2.0f * floorY - cubes[i].y;
+		mirrored[i].rx = -cubes[i].rx;
+		mirrored[i].rz = -cubes[i].rz;
+		mirrored[i].color.a = (u8)(cubes[i].color.a * strength);
+		mirrored[i].edges = cubes[i].edges * strength;
+	}
+	Scene3D_DrawCubes(mirrored, count);
 }
 
 void Scene3D_DrawLogoCube(float x, float y, float size, float alpha)

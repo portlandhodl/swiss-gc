@@ -485,26 +485,126 @@ static void _drawRect(int x, int y, int width, int height, int depth, GXColor co
 	GX_End();
 }
 
+static void _drawRectGradient(int x, int y, int width, int height, int depth, GXColor top, GXColor bottom, float s0, float s1, float t0, float t1)
+{
+	GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+		GX_Position3f32((float) x,(float) y,(float) depth );
+		GX_Color4u8(top.r, top.g, top.b, top.a);
+		GX_TexCoord2f32(s0,t0);
+		GX_Position3f32((float) (x+width),(float) y,(float) depth );
+		GX_Color4u8(top.r, top.g, top.b, top.a);
+		GX_TexCoord2f32(s1,t0);
+		GX_Position3f32((float) (x+width),(float) (y+height),(float) depth );
+		GX_Color4u8(bottom.r, bottom.g, bottom.b, bottom.a);
+		GX_TexCoord2f32(s1,t1);
+		GX_Position3f32((float) x,(float) (y+height),(float) depth );
+		GX_Color4u8(bottom.r, bottom.g, bottom.b, bottom.a);
+		GX_TexCoord2f32(s0,t1);
+	GX_End();
+}
+
+static GXColor mixColor(GXColor a, GXColor b, float t, float alpha)
+{
+	return (GXColor) {
+		(u8)(a.r + (b.r - a.r) * t),
+		(u8)(a.g + (b.g - a.g) * t),
+		(u8)(a.b + (b.b - a.b) * t),
+		(u8)(alpha < 0.0f ? 0 : alpha > 255.0f ? 255 : alpha)
+	};
+}
+
+// One layer of a rounded box using the 4-way mirrored corner texture, shaded top -> middle -> bottom
+static void _drawBoxLayer(GXTexObj *texObj, int x, int y, int width, int height, int depth, GXColor top, GXColor mid, GXColor bottom)
+{
+	GX_InvalidateTexAll();
+	GX_LoadTexObj(texObj, GX_TEXMAP0);
+	_drawRectGradient(x, y, width/2, height/2, depth, top, mid, 0.0f, ((float)width/32), 0.0f, ((float)height/32));
+	_drawRectGradient(x+(width/2), y, width/2, height/2, depth, top, mid, ((float)width/32), 0.0f, 0.0f, ((float)height/32));
+	_drawRectGradient(x, y+(height/2), width/2, height/2, depth, mid, bottom, 0.0f, ((float)width/32), ((float)height/32), 0.0f);
+	_drawRectGradient(x+(width/2), y+(height/2), width/2, height/2, depth, mid, bottom, ((float)width/32), 0.0f, ((float)height/32), 0.0f);
+}
+
+// Diagonal band of light that periodically sweeps across a large panel
+static void _drawGlassSheen(int x, int y, int width, int height)
+{
+	Mtx m;
+	bool perspective;
+	UI_GetTransform(m, &perspective);
+	if(perspective) return;	// The scissor below only lines up with the panel in plain 2D
+
+	float period = 7.0f;
+	float phase = fmodf(Scene3D_Time() + (x + y) * 0.004f, period) / 1.4f;
+	if(phase >= 1.0f) return;
+
+	float skew = height * 0.45f;
+	float band = 70.0f;
+	float bx = x - band + phase * (width + band + skew);
+	GXRModeObj *vmode = getVideoMode();
+	float sy = (float)vmode->efbHeight / 480.0f;
+	GX_SetScissor(MAX(0, x), MAX(0, (int)(y * sy)), width, (int)(height * sy));
+
+	GX_SetNumTevStages(1);
+	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+	GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+	GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
+	for(int half = 0; half < 2; half++) {
+		float x0 = bx + half * band / 2, x1 = x0 + band / 2;
+		u8 a0 = half ? 46 : 0, a1 = half ? 0 : 46;
+		GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+			GX_Position3f32(x0, y, 0.0f);               GX_Color4u8(255, 255, 255, a0); GX_TexCoord2f32(0.0f, 0.0f);
+			GX_Position3f32(x1, y, 0.0f);               GX_Color4u8(255, 255, 255, a1); GX_TexCoord2f32(0.0f, 0.0f);
+			GX_Position3f32(x1 - skew, y + height, 0.0f); GX_Color4u8(255, 255, 255, a1); GX_TexCoord2f32(0.0f, 0.0f);
+			GX_Position3f32(x0 - skew, y + height, 0.0f); GX_Color4u8(255, 255, 255, a0); GX_TexCoord2f32(0.0f, 0.0f);
+		GX_End();
+	}
+	GX_SetScissor(0, 0, vmode->fbWidth, vmode->efbHeight);
+	drawInit();
+}
+
+// Frosted glass panel: soft shadow, tinted body lit from above, specular highlight,
+// bevelled edge and the occasional sheen. A transparent fill only draws the edge.
 static void _DrawSimpleBox(int x, int y, int width, int height, int depth, GXColor fillColor, GXColor borderColor) 
 {
+	GXColor white = (GXColor) {255,255,255,255};
+	GXColor black = (GXColor) {0,0,0,255};
+	int bx = x, by = y, bw = width, bh = height;
+
 	//Adjust for blank texture border
 	x-=4; y-=4; width+=8; height+=8;
-	
-	GX_InvalidateTexAll();
-	GX_LoadTexObj(&boxinnerTexObj, GX_TEXMAP0);
 
-	_drawRect(x, y, width/2, height/2, depth, fillColor, 0.0f, ((float)width/32), 0.0f, ((float)height/32));
-	_drawRect(x+(width/2), y, width/2, height/2, depth, fillColor, ((float)width/32), 0.0f, 0.0f, ((float)height/32));
-	_drawRect(x, y+(height/2), width/2, height/2, depth, fillColor, 0.0f, ((float)width/32), ((float)height/32), 0.0f);
-	_drawRect(x+(width/2), y+(height/2), width/2, height/2, depth, fillColor, ((float)width/32), 0.0f, ((float)height/32), 0.0f);
+	if(fillColor.a) {
+		float a = fillColor.a;
+		if(height >= 30) {
+			_drawBoxLayer(&boxinnerTexObj, x+3, y+5, width, height, depth,
+				mixColor(black, black, 0, a*0.25f), mixColor(black, black, 0, a*0.30f), mixColor(black, black, 0, a*0.40f));
+		}
+		_drawBoxLayer(&boxinnerTexObj, x, y, width, height, depth,
+			mixColor(fillColor, white, 0.22f, a), fillColor, mixColor(fillColor, black, 0.35f, a));
+		_drawBoxLayer(&boxinnerTexObj, x, y, width, height, depth,
+			mixColor(white, white, 0, a*0.28f), mixColor(white, white, 0, 0), mixColor(white, white, 0, a*0.05f));
+	}
 
-	GX_InvalidateTexAll();
-	GX_LoadTexObj(&boxouterTexObj, GX_TEXMAP0);
+	_drawBoxLayer(&boxouterTexObj, x, y, width, height, depth,
+		mixColor(borderColor, white, 0.55f, borderColor.a), borderColor, mixColor(borderColor, black, 0.25f, borderColor.a*0.7f));
 
-	_drawRect(x, y, width/2, height/2, depth, borderColor, 0.0f, ((float)width/32), 0.0f, ((float)height/32));
-	_drawRect(x+(width/2), y, width/2, height/2, depth, borderColor, ((float)width/32), 0.0f, 0.0f, ((float)height/32));
-	_drawRect(x, y+(height/2), width/2, height/2, depth, borderColor, 0.0f, ((float)width/32), ((float)height/32), 0.0f);
-	_drawRect(x+(width/2), y+(height/2), width/2, height/2, depth, borderColor, ((float)width/32), 0.0f, ((float)height/32), 0.0f);
+	if(fillColor.a && bw >= 200 && bh >= 100) {
+		_drawGlassSheen(bx, by, bw, bh);
+	}
+}
+
+// Soft halo around a selected item
+static void _DrawGlassGlow(int x, int y, int width, int height, GXColor color)
+{
+	float pulse = 0.7f + 0.3f*sinf(Scene3D_Time()*4.0f);
+	x-=4; y-=4; width+=8; height+=8;
+	GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_CLEAR);
+	for(int i = 1; i <= 3; i++) {
+		int g = i * 3;
+		GXColor c = color;
+		c.a = (u8)(110.0f * pulse / i);
+		_drawBoxLayer(&boxouterTexObj, x-g, y-g, width+g*2, height+g*2, 0, c, c, c);
+	}
+	drawInit();
 }
 
 // Untextured rectangle that follows the current UI transform
@@ -952,7 +1052,8 @@ static void _DrawSelectableButton(uiDrawObj_t *evt) {
 	x2 = (x2 == -1) ? GetTextSizeInPixels(data->msg)+x1+(borderSize*2)+6 : x2;
 	//Draw Text and backfill (if selected)
 	if(data->mode==B_SELECTED) {
-		_DrawSimpleBox( x1, data->y1, x2-x1, data->y2-data->y1+2, 0, selectColor, borderColor);
+		_DrawGlassGlow(x1, data->y1, x2-x1, data->y2-data->y1+2, THEME_ACCENT);
+		_DrawSimpleBox( x1, data->y1, x2-x1, data->y2-data->y1+2, 0, selectColor, THEME_BORDER);
 	}
 	else {
 		_DrawSimpleBox( x1, data->y1, x2-x1, data->y2-data->y1+2, 0, noColor, borderColor);
@@ -1174,7 +1275,9 @@ static void _DrawFileBrowserButton(uiDrawObj_t *evt) {
 		GXColor noColor 	= data->distFromMiddle == 0 ? THEME_PANEL : THEME_PANEL_DARK;
 		GXColor borderColor = data->distFromMiddle == 0 ? THEME_BORDER : THEME_BORDER_DIM;
 		{
-
+			if(data->distFromMiddle == 0) {
+				_DrawGlassGlow(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, THEME_ACCENT);
+			}
 			_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, noColor, borderColor);
 			
 			int x_mid = data->x2-((data->x2-data->x1)/2);
@@ -1268,6 +1371,9 @@ static void _DrawFileBrowserButton(uiDrawObj_t *evt) {
 		GXColor selectColor = THEME_SELECT;
 		GXColor borderColor = data->mode == B_SELECTED ? THEME_BORDER : THEME_BORDER_DIM;
 
+		if(data->mode == B_SELECTED) {
+			_DrawGlassGlow(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, THEME_ACCENT);
+		}
 		_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 
 					0, data->mode == B_SELECTED ? selectColor : noColor, borderColor);
 		
@@ -1581,6 +1687,7 @@ static void _DrawSelectionBar(uiDrawObj_t *evt) {
 	float pulse = 0.75f + 0.25f*sinf(Scene3D_Time()*4.0f);
 	GXColor fillColor = THEME_SELECT;
 	fillColor.a = (u8)(fillColor.a * pulse);
+	_DrawGlassGlow(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, THEME_ACCENT);
 	_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, fillColor, THEME_BORDER);
 }
 
@@ -1601,8 +1708,7 @@ uiDrawObj_t* DrawSelectionBar(int x1, int y1, int x2, int y2)
 
 // Internal
 static void _DrawTitleBar(uiDrawObj_t *evt) {
-	Scene3D_DrawGradientRect(0, 0, 640, 86, (GXColor) {8,6,30,215}, (GXColor) {8,6,30,40});
-	Scene3D_DrawGradientRect(24, 82, 592, 1, THEME_BORDER_DIM, THEME_BORDER_DIM);
+	_DrawSimpleBox(18, 16, 604, 62, 0, (GXColor) {40,32,112,150}, THEME_BORDER);
 	Scene3D_DrawLogoCube(52, 47, 30, 1.0f);
 
 	drawInit();
@@ -1699,7 +1805,12 @@ static void drawHomeMenu(int selection) {
 	glow.g = (u8)(glow.g * pulse * hb);
 	glow.b = (u8)(glow.b * pulse * hb);
 	glow.a = 255;
-	Scene3D_DrawGlow(&btnhilightTexObj, 320.0f, 236.0f + lift, -140.0f, 340.0f, 230.0f, glow);
+	// Glossy floor: faded reflections of the ring with a line of light along it
+	float floorY = 300.0f + lift;
+	Scene3D_DrawReflections(cubes, MENU_MAX, floorY, 0.32f);
+	Scene3D_DrawGradientRect(0, floorY, 640, 480 - floorY, (GXColor) {8,6,28,(u8)(40*hb)}, (GXColor) {8,6,28,(u8)(235*hb)});
+	Scene3D_DrawGlow(Scene3D_GlowTexture(), 320.0f, floorY, 0.0f, 600.0f, 26.0f, (GXColor) {(u8)(70*hb), (u8)(60*hb), (u8)(130*hb), 255});
+	Scene3D_DrawGlow(Scene3D_GlowTexture(), 320.0f, 236.0f + lift, -140.0f, 380.0f, 300.0f, glow);
 
 	for(int i = 0; i < MENU_MAX; i++) {
 		int item = order[i];
@@ -1711,7 +1822,10 @@ static void drawHomeMenu(int selection) {
 
 	GXColor title = (GXColor) {255,255,255,(u8)(255*hb)};
 	GXColor sub = (GXColor) {190,180,255,(u8)(230*hb)};
-	Scene3D_DrawGradientRect(0, 420, 640, 60, (GXColor) {5,4,18,0}, (GXColor) {5,4,18,(u8)(210*hb)});
+	GXColor border = THEME_BORDER;
+	border.a = (u8)(border.a*hb);
+	drawInit();
+	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*hb)}, border);
 	drawString(320, 356 + lift, homeItems[sel].label, 1.1f, ALIGN_CENTER, title);
 	drawString(320, 384 + lift, homeItems[sel].desc, 0.62f, ALIGN_CENTER, sub);
 	if(devices[DEVICE_CUR] != NULL) {
@@ -1725,9 +1839,10 @@ static void drawHomeMenu(int selection) {
 
 // Hint bar shown along the bottom while browsing files
 static void drawBrowserDock(float alpha) {
-	GXColor sub = (GXColor) {190,180,255,(u8)(230*alpha)};
-	Scene3D_DrawGradientRect(0, 424, 640, 56, (GXColor) {8,6,26,(u8)(40*alpha)}, (GXColor) {8,6,26,(u8)(215*alpha)});
-	Scene3D_DrawGradientRect(24, 425, 592, 1, (GXColor) {150,140,255,(u8)(160*alpha)}, (GXColor) {150,140,255,(u8)(160*alpha)});
+	GXColor sub = (GXColor) {200,192,255,(u8)(240*alpha)};
+	GXColor border = THEME_BORDER;
+	border.a = (u8)(border.a*alpha);
+	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*alpha)}, border);
 	sprintf(fbTextBuffer, "(A) Open    (B) Home Menu    (X) Parent Folder%s%s",
 		swissSettings.enableFileManagement ? "    (Z) Manage" : "",
 		swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
