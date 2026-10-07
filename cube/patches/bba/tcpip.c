@@ -133,7 +133,11 @@ static uint16_t ipv4_checksum(ipv4_header_t *header)
 	return ~sum[0];
 }
 
+#ifdef SSP
+#include "ssp.c"
+#else
 #include "fsp.c"
+#endif
 
 static bool udp_input(bba_page_t *page, eth_header_t *eth, ipv4_header_t *ipv4, udp_header_t *udp, size_t size)
 {
@@ -151,7 +155,11 @@ static bool udp_input(bba_page_t *page, eth_header_t *eth, ipv4_header_t *ipv4, 
 
 		if (udp->src_port == env->port &&
 			udp->dst_port == env->port)
+			#ifdef SSP
+			return ssp_input(page, eth, ipv4, udp, (void *)udp->data, size);
+			#else
 			return fsp_input(page, eth, ipv4, udp, (void *)udp->data, size);
+			#endif
 	}
 
 	return false;

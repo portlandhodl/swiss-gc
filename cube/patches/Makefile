@@ -12,7 +12,7 @@ DEST    = ../swiss/source/patches
 DISASM    = disassembly
 
 .NOTPARALLEL:
-all: clean codehandler cpatches stub sdpatch ideexipatch dvdpatch usbgeckopatch wkfpatch fsppatch gcloaderpatch flippypatch
+all: clean codehandler cpatches stub sdpatch ideexipatch dvdpatch usbgeckopatch wkfpatch fsppatch ssppatch gcloaderpatch flippypatch
 
 stub: stub.bin
 sdpatch: sd-v1.bin sd-v1.card.bin sd-v1.dtk.bin sd-v1.eth.bin sd-v2.bin sd-v2.card.bin sd-v2.dtk.bin sd-v2.eth.bin
@@ -21,6 +21,7 @@ dvdpatch: dvd.bin dvd.card.bin
 usbgeckopatch: usbgecko.bin
 wkfpatch: wkf.bin wkf.card.bin wkf.dtk.bin
 fsppatch: fsp.bin fsp.dtk.bin fsp.eth.bin
+ssppatch: ssp.bin ssp.dtk.bin ssp.eth.bin
 gcloaderpatch: gcloader-v1.bin gcloader-v1.card.bin gcloader-v2.bin gcloader-v2.card.bin gcloader-v2.dtk.bin gcloader-v2.eth.bin
 flippypatch: flippy.bin flippy.card.bin flippy.eth.bin
 
@@ -683,6 +684,68 @@ fsp.eth.bin:
 	@$(OBJDUMP) -D fsp.eth.elf > $(DISASM)/fsp.eth.txt
 	@$(OBJCOPY) -O binary --set-section-flags .bss.*=alloc,load,contents fsp.eth.elf fsp.eth.bin
 	@$(BIN2S) -H $(DEST)/fsp_eth_bin.h fsp.eth.bin > $(DEST)/fsp.eth.bin.s
+	@rm -f *.bin *.elf *.o
+
+ssp.bin:
+	@echo Building SSP Patch ...
+	@$(CC) -Os $(OPTS) -c base/base.S
+	@$(CC) -Os $(OPTS) -c base/emulator.c -DASYNC_READ -DBBA -DNO_VIDEO
+	@$(CC) -Os $(OPTS) -c base/frag.c -DDEVICE_PATCHES=1
+	@$(CC) -Os $(OPTS) -c base/interrupt.c -DIRQ_MASK=0b00000000001001011000000000000000
+	@$(CC) -Os $(OPTS) -c base/ipl.c
+	@$(CC) -Os $(OPTS) -c bba/bba.c -DSSP -DASYNC_READ
+	@$(CC) -Os $(OPTS) -c sdgecko/sd.c -DDMA_READ=0 -DISR_READ=1 -DWRITE=0
+	@$(CC) -Os $(OPTS) -c sdgecko/sd_isr.S
+	@$(CC) -Os $(OPTS) -c usbgecko/uart.c
+	@$(CC) -Os $(OPTS) -c base/dolphin/os.c
+	@$(CC) -Os $(OPTS) -c base/memcpy.S
+	@$(CC) -Os $(OPTS) -c base/setjmp.S
+	@$(CC) -Os $(OPTS) -o ssp.elf -T base/base.ld -T base/common.ld -T base/dolphin/os.ld base.o emulator.o frag.o interrupt.o ipl.o bba.o sd.o sd_isr.o uart.o os.o memcpy.o setjmp.o
+	@mkdir -p $(DISASM)
+	@$(OBJDUMP) -D ssp.elf > $(DISASM)/ssp.txt
+	@$(OBJCOPY) -O binary --set-section-flags .bss.*=alloc,load,contents ssp.elf ssp.bin
+	@$(BIN2S) -H $(DEST)/ssp_bin.h ssp.bin > $(DEST)/ssp.bin.s
+	@rm -f *.bin *.elf *.o
+
+ssp.dtk.bin:
+	@echo Building SSP Patch + DTK ...
+	@$(CC) -Os $(OPTS) -c base/base.S
+	@$(CC) -Os $(OPTS) -c base/emulator.c -DASYNC_READ -DBBA -DDTK -DNO_VIDEO
+	@$(CC) -Os $(OPTS) -c base/audio.c
+	@$(CC) -Os $(OPTS) -c base/fifo.c
+	@$(CC) -Os $(OPTS) -c base/frag.c -DDEVICE_PATCHES=1
+	@$(CC) -Os $(OPTS) -c base/interrupt.c -DIRQ_MASK=0b00000000001000010000000000000000
+	@$(CC) -Os $(OPTS) -c base/ipl.c
+	@$(CC) -Os $(OPTS) -c bba/bba.c -DSSP -DASYNC_READ -DQUEUE_SIZE=3
+	@$(CC) -Os $(OPTS) -c usbgecko/uart.c
+	@$(CC) -Os $(OPTS) -c base/dolphin/os.c
+	@$(CC) -Os $(OPTS) -c base/memcpy.S
+	@$(CC) -Os $(OPTS) -c base/setjmp.S
+	@$(CC) -Os $(OPTS) -o ssp.dtk.elf -T base/base.ld -T base/common.ld -T base/dolphin/os.ld base.o emulator.o audio.o fifo.o frag.o interrupt.o ipl.o bba.o uart.o os.o memcpy.o setjmp.o
+	@mkdir -p $(DISASM)
+	@$(OBJDUMP) -D ssp.dtk.elf > $(DISASM)/ssp.dtk.txt
+	@$(OBJCOPY) -O binary --set-section-flags .bss.*=alloc,load,contents ssp.dtk.elf ssp.dtk.bin
+	@$(BIN2S) -H $(DEST)/ssp_dtk_bin.h ssp.dtk.bin > $(DEST)/ssp.dtk.bin.s
+	@rm -f *.bin *.elf *.o
+
+ssp.eth.bin:
+	@echo Building SSP Patch + ETH ...
+	@$(CC) -Os $(OPTS) -c base/base.S
+	@$(CC) -Os $(OPTS) -c base/emulator.c -DASYNC_READ -DBBA -DETH_EMULATOR -DNO_VIDEO
+	@$(CC) -Os $(OPTS) -c base/emulator_eth.c -DBBA
+	@$(CC) -Os $(OPTS) -c base/frag.c -DDEVICE_PATCHES=1
+	@$(CC) -Os $(OPTS) -c base/interrupt.c -DIRQ_MASK=0b00000000001000010000000000000000
+	@$(CC) -Os $(OPTS) -c base/ipl.c
+	@$(CC) -Os $(OPTS) -c bba/bba.c -DSSP -DASYNC_READ -DETH_EMULATOR
+	@$(CC) -Os $(OPTS) -c usbgecko/uart.c
+	@$(CC) -Os $(OPTS) -c base/dolphin/os.c
+	@$(CC) -Os $(OPTS) -c base/memcpy.S
+	@$(CC) -Os $(OPTS) -c base/setjmp.S
+	@$(CC) -Os $(OPTS) -o ssp.eth.elf -T base/base.ld -T base/common.ld -T base/dolphin/os.ld base.o emulator.o emulator_eth.o frag.o interrupt.o ipl.o bba.o uart.o os.o memcpy.o setjmp.o
+	@mkdir -p $(DISASM)
+	@$(OBJDUMP) -D ssp.eth.elf > $(DISASM)/ssp.eth.txt
+	@$(OBJCOPY) -O binary --set-section-flags .bss.*=alloc,load,contents ssp.eth.elf ssp.eth.bin
+	@$(BIN2S) -H $(DEST)/ssp_eth_bin.h ssp.eth.bin > $(DEST)/ssp.eth.bin.s
 	@rm -f *.bin *.elf *.o
 
 gcloader-v1.bin:
