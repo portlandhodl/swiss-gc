@@ -99,7 +99,8 @@ static char *tooltips_interface[PAGE_INTERFACE_MAX+1] = {
 	[SET_RECENT_LIST] = "Recent List:\n\n(On) - Press Start while browsing to show a recent list.\n(Lazy) - Same as On but list updates only for new entries.\n(Off) - Recent list is completely disabled.\n\nThe lazy/off options exist to minimise SD card writes.",
 	[SET_HIDE_UNK] = "Hide unknown file types:\n\nDisabled - Show all files (default)\nEnabled - Hide unknown file types from being displayed\n\nKnown file types are:\n GameCube Executables (.bin/.dol/.elf)\n Disc images (.gcm/.iso/.nkit.iso/.tgc)\n MP3 Music (.mp3)\n WASP/WKF Flash files (.fzn)\n GameCube Memory Card files (.gci/.gcs/.sav)\n GameCube Executables with parameters appended (.dol+cli)",
 	[SET_FLATTEN_DIR] = "Flatten directory:\n\nFlattens a directory structure matching a glob pattern.",
-	[SET_UI_SOUNDS] = "Menu Sounds:\n\nPlays short sound effects when moving around and selecting\nitems in the menus."
+	[SET_UI_SOUNDS] = "Menu Sounds:\n\nPlays short sound effects when moving around and selecting\nitems in the menus.",
+	[SET_UI_OVERSCAN] = "Menu Overscan:\n\nShrinks the menus towards the centre of the screen so nothing\nis cut off at the edges of TVs that overscan.\n\n0% uses the full picture."
 };
 
 static char *tooltips_network[PAGE_NETWORK_MAX+1] = {
@@ -208,6 +209,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 	char bbaNetmaskStr[8];
 	char forceVOffsetStr[8];
 	char triggerLevelStr[8];
+	char uiOverscanStr[8];
 	
 	// Save Settings to current device (**Shown on all tabs**)
 	/** Global Settings (Page 1/) */
@@ -311,6 +313,8 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		drawSettingEntryString(page, &page_y_ofs, "Load at startup:", getAutoLoadDeviceName(&swissSettings), option == SET_AUTOLOAD, true);
 		drawSettingEntryString(page, &page_y_ofs, "Flatten directory:", swissSettings.flattenDir, option == SET_FLATTEN_DIR, true);
 		drawSettingEntryBoolean(page, &page_y_ofs, "Menu Sounds:", swissSettings.uiSounds, option == SET_UI_SOUNDS, true);
+		sprintf(uiOverscanStr, "%i%%", swissSettings.uiOverscan);
+		drawSettingEntryString(page, &page_y_ofs, "Menu Overscan:", uiOverscanStr, option == SET_UI_OVERSCAN, true);
 	}
 	else if(page_num == PAGE_NETWORK) {
 		int settings_per_page = 10;
@@ -676,6 +680,9 @@ void settings_toggle(int page, int option, int direction, ConfigEntry *gameConfi
 			break;
 			case SET_UI_SOUNDS:
 				swissSettings.uiSounds ^= 1;
+			break;
+			case SET_UI_OVERSCAN:
+				swissSettings.uiOverscan = MIN(MAX(swissSettings.uiOverscan + direction, 0), 10);
 			break;
 			case SET_HIDE_UNK:
 				swissSettings.hideUnknownFileTypes ^= 1;

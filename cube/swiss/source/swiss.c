@@ -519,24 +519,12 @@ void drawFilesCarousel(file_handle** directory, int num_files, uiDrawObj_t *cont
 	}
 }
 
-#define GAMES_COLS 3
-#define GAMES_ROWS 2
+#define GAMES_PAGE 5
 
-// Draws the games collection as a grid of cards
-void drawGamesGrid(file_handle** directory, int num_files, uiDrawObj_t *containerPanel) {
-	static int topRow = 0;
-	int card_w = 186, card_h = 150, gap = 14;
-	int x_base = (getVideoMode()->fbWidth - (GAMES_COLS * card_w + (GAMES_COLS - 1) * gap)) / 2;
-	int y_base = 108;
-	int selRow = curSelection / GAMES_COLS;
-	int numRows = (num_files + GAMES_COLS - 1) / GAMES_COLS;
-
-	// Keep the selected row on screen
-	if(selRow < topRow) topRow = selRow;
-	if(selRow >= topRow + GAMES_ROWS) topRow = selRow - GAMES_ROWS + 1;
-	if(topRow > MAX(0, numRows - GAMES_ROWS)) topRow = MAX(0, numRows - GAMES_ROWS);
-	current_view_start = topRow * GAMES_COLS;
-	current_view_end = MIN(num_files, current_view_start + GAMES_COLS * GAMES_ROWS);
+// Draws the games collection as an animated cover flow
+void drawGamesCoverflow(file_handle** directory, int num_files, uiDrawObj_t *containerPanel) {
+	current_view_start = MAX(0, curSelection - 6);
+	current_view_end = MIN(num_files, curSelection + 7);
 
 	sprintf(txtbuffer, "Games on %s", devices[DEVICE_CUR]->deviceName);
 	float scale = GetTextScaleToFitInWidthWithMax(txtbuffer, 400, 0.8f);
@@ -544,24 +532,15 @@ void drawGamesGrid(file_handle** directory, int num_files, uiDrawObj_t *containe
 	sprintf(txtbuffer, "%i of %i", curSelection + 1, num_files);
 	DrawAddChild(containerPanel, DrawStyledLabel(getVideoMode()->fbWidth - 30, 92, txtbuffer, 0.6f, ALIGN_RIGHT, accentColor));
 
-	// The selected card is added last so it can lift above its neighbours
-	for(int pass = 0; pass < 2; pass++) {
-		for(int i = current_view_start; i < current_view_end; i++) {
-			if((i == curSelection) != (pass == 1)) continue;
-			int col = i % GAMES_COLS, row = i / GAMES_COLS - topRow;
-			int x1 = x_base + col * (card_w + gap);
-			int y1 = y_base + row * (card_h + gap);
-			lockFile(directory[i]);
-			populate_meta(directory[i]);
-			uiDrawObj_t *card = DrawGameCard(x1, y1, x1 + card_w, y1 + card_h, directory[i], i == curSelection ? B_SELECTED : B_NOSELECT);
-			directory[i]->uiObj = card;
-			unlockFile(directory[i]);
-			DrawAddChild(containerPanel, card);
-		}
+	for(int i = current_view_start; i < current_view_end; i++) {
+		lockFile(directory[i]);
+		populate_meta(directory[i]);
+		unlockFile(directory[i]);
 	}
+	DrawAddChild(containerPanel, DrawCoverflow(directory, num_files, curSelection));
 }
 
-// Games collection (every disc image on the device, shown as cards)
+// Games collection (every disc image on the device, shown as a cover flow)
 uiDrawObj_t* renderGamesGrid(file_handle** directory, int num_files, uiDrawObj_t* filePanel)
 {
 	if(num_files<=0) {
@@ -578,30 +557,24 @@ uiDrawObj_t* renderGamesGrid(file_handle** directory, int num_files, uiDrawObj_t
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
 		uiDrawObj_t *newPanel = DrawFilePanel();
-		drawGamesGrid(directory, num_files, newPanel);
+		drawGamesCoverflow(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
 		
 		u32 waitButtons = BUTTON_START|BUTTON_B|BUTTON_A|BUTTON_UP|BUTTON_DOWN|BUTTON_LEFT|BUTTON_RIGHT|BUTTON_L|BUTTON_R;
-		while ((padsStickX() > -16 && padsStickX() < 16) && (padsStickY() > -16 && padsStickY() < 16) && !(padsButtonsHeld() & waitButtons))
+		while ((padsStickX() > -16 && padsStickX() < 16) && !(padsButtonsHeld() & waitButtons))
 			{ VIDEO_WaitVSync (); }
 		if((padsButtonsHeld() & BUTTON_LEFT) || padsStickX() <= -16) {
-			curSelection = (curSelection > 0) ? curSelection-1 : num_files-1;
+			curSelection = MAX(0, curSelection - 1);
 		}
 		if((padsButtonsHeld() & BUTTON_RIGHT) || padsStickX() >= 16) {
-			curSelection = (curSelection + 1) % num_files;
+			curSelection = MIN(num_files-1, curSelection + 1);
 		}
-		if((padsButtonsHeld() & BUTTON_UP) || padsStickY() >= 16) {
-			curSelection = MAX(0, curSelection - GAMES_COLS);
+		if(padsButtonsHeld() & (BUTTON_UP|BUTTON_L)) {
+			curSelection = MAX(0, curSelection - GAMES_PAGE);
 		}
-		if((padsButtonsHeld() & BUTTON_DOWN) || padsStickY() <= -16) {
-			curSelection = MIN(num_files-1, curSelection + GAMES_COLS);
-		}
-		if(padsButtonsHeld() & BUTTON_L) {
-			curSelection = MAX(0, curSelection - GAMES_COLS * GAMES_ROWS);
-		}
-		if(padsButtonsHeld() & BUTTON_R) {
-			curSelection = MIN(num_files-1, curSelection + GAMES_COLS * GAMES_ROWS);
+		if(padsButtonsHeld() & (BUTTON_DOWN|BUTTON_R)) {
+			curSelection = MIN(num_files-1, curSelection + GAMES_PAGE);
 		}
 		
 		if(padsButtonsHeld() & BUTTON_A) {
@@ -624,8 +597,9 @@ uiDrawObj_t* renderGamesGrid(file_handle** directory, int num_files, uiDrawObj_t
 			select_recent_entry();
 			break;
 		}
-		if(padsStickX() <= -16 || padsStickX() >= 16 || padsStickY() <= -16 || padsStickY() >= 16) {
-			VIDEO_WaitForRetrace(retraceCount + lrintf(0.15f * VIDEO_GetRetraceRate()));
+		if(padsStickX() <= -16 || padsStickX() >= 16) {
+			// Holding the stick scrolls through the cover flow, faster when pushed further
+			VIDEO_WaitForRetrace(retraceCount + lrintf((abs(padsStickX()) > 64 ? 0.08f : 0.16f) * VIDEO_GetRetraceRate()));
 		}
 		else {
 			while (padsButtonsHeld() & waitButtons)

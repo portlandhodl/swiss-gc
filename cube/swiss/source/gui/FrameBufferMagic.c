@@ -116,11 +116,12 @@ enum VideoEventType
 	EV_TITLEBAR,
 	EV_SCENE3D,
 	EV_PAGEHEADER,
-	EV_SELECTBAR
+	EV_SELECTBAR,
+	EV_COVERFLOW
 };
 
 char * typeStrings[] = {"TexObj", "MsgBox", "Image", "Progress", "SelectableButton", "EmptyBox", "TransparentBox",
-						"FileBrowserButton", "VertScrollbar", "StyledLabel", "Container", "MenuButtons", "Tooltip", "TitleBar", "Scene3D", "PageHeader", "SelectBar"};
+						"FileBrowserButton", "VertScrollbar", "StyledLabel", "Container", "MenuButtons", "Tooltip", "TitleBar", "Scene3D", "PageHeader", "SelectBar", "Coverflow"};
 
 typedef struct drawTexObjEvent {
 	GXTexObj *texObj;
@@ -199,7 +200,7 @@ typedef struct drawFileBrowserButtonEvent {
 	int alpha;
 	bool isAutoLoadEntry;
 	bool isCarousel;	// Draw this as a full "card" style
-	bool isGameCard;	// Draw this as a card in the games grid
+	bool isGameCard;	// Draw this as a game card (cover flow)
 	int distFromMiddle;	// 0 = middle card, otherwise how many cards to the left (-) or right (+)
 } drawFileBrowserButtonEvent_t;
 
@@ -234,6 +235,13 @@ typedef struct drawPageHeaderEvent {
 	int pageCount;
 } drawPageHeaderEvent_t;
 
+typedef struct drawCoverflowEvent {
+	int selected;	// index into the full list
+	int first;		// list index of cards[0]
+	int count;
+	struct uiDrawObj **cards;
+} drawCoverflowEvent_t;
+
 typedef struct uiDrawObjQueue {
 	struct uiDrawObj *event;
 	struct uiDrawObjQueue *next;
@@ -246,6 +254,7 @@ static uiDrawObj_t *buttonPanel = NULL;
 static bool customBackdrop = false;
 static float homeBlend = 0.0f;	// 0 = file browser, 1 = home menu
 static float ringPos = 0.0f;	// smoothed home menu selection
+static float coverflowPos = -100.0f;	// smoothed cover flow position
 
 // Add root level uiDrawObj_t
 static uiDrawObj_t* addVideoEvent(uiDrawObj_t *event) {
@@ -315,6 +324,14 @@ static void clearNestedEvent(uiDrawObj_t *event) {
 		}
 		else if(event->type == EV_PAGEHEADER) {
 			free(((drawPageHeaderEvent_t*)event->data)->title);
+		}
+		else if(event->type == EV_COVERFLOW) {
+			drawCoverflowEvent_t *data = (drawCoverflowEvent_t*)event->data;
+			for(int i = 0; i < data->count; i++) {
+				data->cards[i]->disposed = true;
+				clearNestedEvent(data->cards[i]);
+			}
+			free(data->cards);
 		}
 		//print_debug("Clear Nested event->data\n");
 		free(event->data);
@@ -542,7 +559,9 @@ static void _drawGlassSheen(int x, int y, int width, int height)
 	float bx = x - band + phase * (width + band + skew);
 	GXRModeObj *vmode = getVideoMode();
 	float sy = (float)vmode->efbHeight / 480.0f;
-	GX_SetScissor(MAX(0, x), MAX(0, (int)(y * sy)), width, (int)(height * sy));
+	float os = UI_GetOverscan();
+	float sx0 = 320.0f + (x - 320.0f) * os, sy0 = 240.0f + (y - 240.0f) * os;
+	GX_SetScissor(MAX(0, (int)sx0), MAX(0, (int)(sy0 * sy)), (int)(width * os), (int)(height * os * sy));
 
 	GX_SetNumTevStages(1);
 	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
@@ -1267,7 +1286,7 @@ uiDrawObj_t* DrawContainer()
 }
 
 // Internal
-// Card in the games grid: banner, title, publisher, size and region
+// Game card for the cover flow: banner, title, publisher, size and region
 static void _DrawGameCard(drawFileBrowserButtonEvent_t *data) {
 	file_handle *file = data->file;
 	bool selected = data->mode == B_SELECTED;
@@ -1599,12 +1618,94 @@ uiDrawObj_t* DrawFileBrowserButtonMeta(int x1, int y1, int x2, int y2, const cha
 	return DrawFileBrowserButton(x1, y1, x2, y2, message, file, mode);
 }
 
-uiDrawObj_t* DrawGameCard(int x1, int y1, int x2, int y2, file_handle *file, int mode) {
-	uiDrawObj_t* event = DrawFileBrowserButtonMeta(x1, y1, x2, y2, getRelativeName(file->name), file, mode);
-	((drawFileBrowserButtonEvent_t*)event->data)->isGameCard = true;
-	if(mode == B_SELECTED) {
-		DrawSetAnimation(event, UI_ANIM_LIFT, (x1 + x2) / 2.0f, (y1 + y2) / 2.0f);
+// Pose of a cover flow card that is rel places away from the (animated) middle
+static void coverflowTransform(Mtx m, float rel, drawFileBrowserButtonEvent_t *card) {
+	float side = rel < 0.0f ? -1.0f : 1.0f;
+	float dist = fabsf(rel);
+	float k = MIN(dist, 1.0f);
+	float e = k * k * (3.0f - 2.0f * k);	// smoothstep into the turned pose
+	float beyond = MAX(dist - 1.0f, 0.0f);
+	float cx = (card->x1 + card->x2) / 2.0f, cy = (card->y1 + card->y2) / 2.0f;
+	UI_MakeTransform(m, cx, cy, side * (e * 178.0f + beyond * 50.0f), 0.0f, -e * 170.0f - beyond * 26.0f, side * e * 1.0f, 0.0f, 1.0f);
+}
+
+// Internal
+static void _DrawCoverflow(uiDrawObj_t *evt) {
+	drawCoverflowEvent_t *data = (drawCoverflowEvent_t*)evt->data;
+	if(!data->count) return;
+
+	// Glide towards the selection, jump if it's far away (e.g. entering the view)
+	if(fabsf(coverflowPos - data->selected) > 8.0f) coverflowPos = data->selected;
+	coverflowPos += (data->selected - coverflowPos) * MIN(1.0f, Scene3D_FrameDelta() * 10.0f);
+
+	Mtx base, m, full;
+	bool basePerspective;
+	UI_GetTransform(base, &basePerspective);
+
+	int order[data->count];
+	float rel[data->count];
+	for(int i = 0; i < data->count; i++) {
+		rel[i] = data->first + i - coverflowPos;
+		order[i] = i;
 	}
+	for(int i = 1; i < data->count; i++) {
+		for(int j = i; j > 0 && fabsf(rel[order[j]]) > fabsf(rel[order[j-1]]); j--) {
+			int tmp = order[j]; order[j] = order[j-1]; order[j-1] = tmp;
+		}
+	}
+
+	// Every card shares the same rectangle, only its pose differs
+	drawFileBrowserButtonEvent_t *layout = (drawFileBrowserButtonEvent_t*)data->cards[0]->data;
+	for(int pass = 0; pass < 2; pass++) {
+		for(int k = 0; k < data->count; k++) {
+			int i = order[k];
+			drawFileBrowserButtonEvent_t *card = (drawFileBrowserButtonEvent_t*)data->cards[i]->data;
+			coverflowTransform(m, rel[i], card);
+			if(pass == 0) {
+				// Mirror below the card for the reflection on the floor
+				Mtx mirror, tmp;
+				guMtxIdentity(mirror);
+				mirror[1][1] = -1.0f;
+				mirror[1][3] = 2.0f * card->y2 + 6.0f;
+				guMtxConcat(m, mirror, tmp);
+				guMtxCopy(tmp, m);
+			}
+			guMtxConcat(base, m, full);
+			UI_SetTransform(full, true);
+			drawInit();
+			_DrawGameCard(card);
+		}
+		UI_SetTransform(base, basePerspective);
+		if(pass == 0) {
+			// Fade the reflections into the floor
+			float fx = 320.0f, fy = layout->y2 + 3.0f, fz = 0.0f;
+			UI_TransformPoint(&fx, &fy, &fz);
+			Scene3D_DrawGradientRect(0, fy, 640, 480 - fy, (GXColor) {8,6,28,70}, (GXColor) {8,6,28,245});
+			drawInit();
+		}
+	}
+}
+
+// External
+// iTunes style cover flow of game cards around the selected one
+uiDrawObj_t* DrawCoverflow(file_handle **files, int numFiles, int selected)
+{
+	int first = MAX(0, selected - 6);
+	int last = MIN(numFiles - 1, selected + 6);
+	drawCoverflowEvent_t *eventData = calloc(1, sizeof(drawCoverflowEvent_t));
+	eventData->selected = selected;
+	eventData->first = first;
+	eventData->count = numFiles > 0 ? last - first + 1 : 0;
+	eventData->cards = calloc(eventData->count ? eventData->count : 1, sizeof(uiDrawObj_t*));
+	for(int i = 0; i < eventData->count; i++) {
+		file_handle *file = files[first + i];
+		uiDrawObj_t *card = DrawFileBrowserButtonMeta(200, 120, 440, 318, getRelativeName(file->name), file, first + i == selected ? B_SELECTED : B_NOSELECT);
+		((drawFileBrowserButtonEvent_t*)card->data)->isGameCard = true;
+		eventData->cards[i] = card;
+	}
+	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
+	event->type = EV_COVERFLOW;
+	event->data = eventData;
 	return event;
 }
 
@@ -1731,7 +1832,7 @@ static void _DrawPageHeader(uiDrawObj_t *evt) {
 			cubes[i].y = data->y + 1.0f;
 			cubes[i].z = 0.0f;
 			UI_TransformPoint(&cubes[i].x, &cubes[i].y, &cubes[i].z);
-			cubes[i].size = current ? 12.0f : 8.0f;
+			cubes[i].size = (current ? 12.0f : 8.0f) * UI_GetOverscan();
 			cubes[i].rx = 0.5f;
 			cubes[i].ry = current ? t*1.5f : 0.6f;
 			cubes[i].rz = 0.0f;
@@ -1786,7 +1887,9 @@ uiDrawObj_t* DrawSelectionBar(int x1, int y1, int x2, int y2)
 // Internal
 static void _DrawTitleBar(uiDrawObj_t *evt) {
 	_DrawSimpleBox(18, 16, 604, 62, 0, (GXColor) {40,32,112,150}, THEME_BORDER);
-	Scene3D_DrawLogoCube(52, 47, 30, 1.0f);
+	float logoX = 52.0f, logoY = 47.0f, logoZ = 0.0f;
+	UI_TransformPoint(&logoX, &logoY, &logoZ);
+	Scene3D_DrawLogoCube(logoX, logoY, 30.0f * UI_GetOverscan(), 1.0f);
 
 	drawInit();
 	_DrawImageNow(TEX_SWISS, 80, 32, 96, 32, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
@@ -1830,10 +1933,13 @@ static const struct {
 	[MENU_EXIT]     = {"Exit",        "Leave Swiss and reboot the console",     {240, 100,  96, 0}},
 };
 
-static GXTexObj *homeIcon(int item, float *aspect) {
+static GXTexObj *homeIcon(int item, float *aspect, float *s0, float *s1) {
+	*s0 = 0.0f;
+	*s1 = 1.0f;
 	switch(item) {
-		case MENU_GAMES:    *aspect = (float)GX_GetTexObjWidth(&gcmimgTexObj) / GX_GetTexObjHeight(&gcmimgTexObj); return &gcmimgTexObj;
-		case MENU_FILES:    *aspect = (float)GX_GetTexObjWidth(&dirimgTexObj) / GX_GetTexObjHeight(&dirimgTexObj); return &dirimgTexObj;
+		// The file type images are "GCM"/"DIR" labels with a pictogram on the right, only show the pictogram
+		case MENU_GAMES:    *aspect = 1.0f; *s0 = 0.65f; *s1 = 0.98f; return &gcmimgTexObj;
+		case MENU_FILES:    *aspect = 1.0f; *s0 = 0.65f; *s1 = 0.98f; return &dirimgTexObj;
 		case MENU_DEVICE:   *aspect = (float)BTNDEVICE_WIDTH / BTNDEVICE_HEIGHT;     return &btndeviceTexObj;
 		case MENU_SETTINGS: *aspect = (float)BTNSETTINGS_WIDTH / BTNSETTINGS_HEIGHT; return &btnsettingsTexObj;
 		case MENU_INFO:     *aspect = (float)BTNINFO_WIDTH / BTNINFO_HEIGHT;         return &btninfoTexObj;
@@ -1895,10 +2001,10 @@ static void drawHomeMenu(int selection) {
 
 	for(int i = 0; i < MENU_MAX; i++) {
 		int item = order[i];
-		float aspect;
-		GXTexObj *icon = homeIcon(item, &aspect);
+		float aspect, s0, s1;
+		GXTexObj *icon = homeIcon(item, &aspect, &s0, &s1);
 		Scene3D_DrawCubes(&cubes[item], 1);
-		Scene3D_DrawCubeIcon(&cubes[item], icon, aspect, hb);
+		Scene3D_DrawCubeIcon(&cubes[item], icon, aspect, s0, s1, hb);
 	}
 
 	GXColor title = (GXColor) {255,255,255,(u8)(255*hb)};
@@ -1925,7 +2031,7 @@ static void drawBrowserDock(float alpha) {
 	border.a = (u8)(border.a*alpha);
 	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*alpha)}, border);
 	if(gamesMode) {
-		sprintf(fbTextBuffer, "(A) Play    (B) Home Menu    (L/R) Page%s",
+		sprintf(fbTextBuffer, "(A) Play    (B) Home Menu    (L/R) Jump%s",
 			swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
 	}
 	else {
@@ -2575,13 +2681,6 @@ static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 	if(videoEvent->hasXform) {
 		composeTransform(videoEvent->xform, true);
 	}
-	else if(videoEvent->anim == UI_ANIM_LIFT) {
-		float t = (float)ticks_to_millisecs(gettime() - videoEvent->born) / 180.0f;
-		float e = t < 1.0f ? easeOutBack(t) : 1.0f;
-		float sway = sinf(Scene3D_Time()*1.6f) * 0.06f * e;
-		UI_MakeTransform(local, videoEvent->cx, videoEvent->cy, 0.0f, 0.0f, 40.0f*e, sway, 0.0f, 1.0f + 0.04f*e);
-		composeTransform(local, true);
-	}
 	else if(videoEvent->anim == UI_ANIM_SWAY) {
 		float t = (float)ticks_to_millisecs(gettime() - videoEvent->born) / 300.0f;
 		float flip = t < 1.0f ? (1.0f - easeOutBack(t)) * 1.6f : 0.0f;
@@ -2639,6 +2738,9 @@ static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 		case EV_SELECTBAR:
 			_DrawSelectionBar(videoEvent);
 			break;
+		case EV_COVERFLOW:
+			_DrawCoverflow(videoEvent);
+			break;
 		default:
 			break;
 	}
@@ -2692,6 +2794,7 @@ static void *videoUpdate(void *videoEventQueue) {
 		}
 		
 		Scene3D_NewFrame();
+		UI_SetOverscan(1.0f - swissSettings.uiOverscan / 100.0f);
 		UISound_Poll();
 		GXRModeObj *vmode = getVideoMode();
 		if(vmode->field_rendering) {

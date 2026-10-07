@@ -47,7 +47,6 @@
 #define UI_ANIM_POP       1	// zoom in from depth when first shown (applies to its children)
 #define UI_ANIM_SWAY      2	// flips in, then gently rocks in 3D about its centre (this object only)
 #define UI_ANIM_FILEPANEL 3	// recedes while the home menu is open (applies to its children)
-#define UI_ANIM_LIFT      4	// lifts towards the viewer when shown, then floats (this object only)
 
 typedef struct uiDrawObj {
     int type;
@@ -151,7 +150,7 @@ uiDrawObj_t* DrawRepublish(uiDrawObj_t *old, uiDrawObj_t *new);
 void DrawDispose(uiDrawObj_t *evt);
 uiDrawObj_t* DrawFileBrowserButton(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int mode);
 uiDrawObj_t* DrawFileBrowserButtonMeta(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int mode);
-uiDrawObj_t* DrawGameCard(int x1, int y1, int x2, int y2, file_handle *file, int mode);
+uiDrawObj_t* DrawCoverflow(file_handle **files, int numFiles, int selected);
 uiDrawObj_t* DrawFileCarouselEntry(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int distFromMiddle);
 uiDrawObj_t* DrawVertScrollBar(int x, int y, int width, int height, float scrollPercent, int scrollHeight);
 void DrawArgsSelector(const char *fileName);

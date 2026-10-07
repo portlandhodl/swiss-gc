@@ -18,6 +18,7 @@
 
 static Mtx uiXform;
 static bool uiPerspective;
+static float uiOverscan = 1.0f;
 static bool initialised;
 
 static u64 startTick;
@@ -193,11 +194,33 @@ void UI_LoadProjection(void)
 	else loadOrtho();
 }
 
+// Scale the whole UI about the centre of the screen to keep it inside the visible area
+void UI_SetOverscan(float scale)
+{
+	uiOverscan = scale;
+}
+
+float UI_GetOverscan(void)
+{
+	return uiOverscan;
+}
+
+static void applyOverscan(Mtx m)
+{
+	for (int col = 0; col < 4; col++) {
+		m[0][col] *= uiOverscan;
+		m[1][col] *= uiOverscan;
+	}
+	m[0][3] += 320.0f * (1.0f - uiOverscan);
+	m[1][3] += 240.0f * (1.0f - uiOverscan);
+}
+
 void UI_ApplyTransform(Mtx local, Mtx out)
 {
 	Mtx t;
 	if (!initialised) Scene3D_Init();
 	guMtxConcat(uiXform, local, t);
+	applyOverscan(t);
 	if (uiPerspective) {
 		Mtx v;
 		screenView(v);
@@ -214,8 +237,8 @@ void UI_TransformPoint(float *x, float *y, float *z)
 	if (!initialised) Scene3D_Init();
 	guVector v = {*x, *y, *z};
 	guVecMultiply(uiXform, &v, &v);
-	*x = v.x;
-	*y = v.y;
+	*x = 320.0f + (v.x - 320.0f) * uiOverscan;
+	*y = 240.0f + (v.y - 240.0f) * uiOverscan;
 	*z = v.z;
 }
 
@@ -590,7 +613,8 @@ void Scene3D_DrawLogoCube(float x, float y, float size, float alpha)
 	Scene3D_DrawCubes(cubes, 8);
 }
 
-void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float alpha)
+// s0..s1 selects the horizontal part of the texture to show
+void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float s0, float s1, float alpha)
 {
 	Mtx mv, rot;
 	cubeMatrices(cube, mv, rot);
@@ -608,10 +632,10 @@ void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, 
 	else hw *= aspect;
 	u8 a = (u8)(255.0f * alpha * (facing > 1.0f ? 1.0f : facing));
 	GX_Begin(GX_QUADS, VTXFMT_TEX, 4);
-		GX_Position3f32(-hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(0.0f, 0.0f);
-		GX_Position3f32( hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(1.0f, 0.0f);
-		GX_Position3f32( hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(1.0f, 1.0f);
-		GX_Position3f32(-hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(0.0f, 1.0f);
+		GX_Position3f32(-hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s0, 0.0f);
+		GX_Position3f32( hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s1, 0.0f);
+		GX_Position3f32( hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s1, 1.0f);
+		GX_Position3f32(-hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s0, 1.0f);
 	GX_End();
 	finishPipeline();
 }

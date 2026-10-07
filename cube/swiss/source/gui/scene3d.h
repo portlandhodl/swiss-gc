@@ -44,6 +44,8 @@ void UI_GetTransform(Mtx m, bool *perspective);
 void UI_LoadProjection(void);
 void UI_ApplyTransform(Mtx local, Mtx out);
 void UI_TransformPoint(float *x, float *y, float *z);
+void UI_SetOverscan(float scale);
+float UI_GetOverscan(void);
 
 // Build a transform that rotates a flat UI element about a pivot in 3D
 void UI_MakeTransform(Mtx out, float pivotX, float pivotY, float tx, float ty, float tz, float rotY, float rotX, float scale);
@@ -51,7 +53,7 @@ void UI_MakeTransform(Mtx out, float pivotX, float pivotY, float tx, float ty, f
 void Scene3D_DrawBackground(void);
 void Scene3D_DrawCubes(cube3d_t *cubes, int count);
 void Scene3D_DrawLogoCube(float x, float y, float size, float alpha);
-void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float alpha);
+void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float s0, float s1, float alpha);
 void Scene3D_DrawGlow(GXTexObj *texObj, float x, float y, float z, float w, float h, GXColor color);
 void Scene3D_DrawReflections(const cube3d_t *cubes, int count, float floorY, float strength);
 GXTexObj *Scene3D_GlowTexture(void);

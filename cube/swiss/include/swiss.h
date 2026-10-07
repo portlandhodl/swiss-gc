@@ -183,6 +183,7 @@ typedef struct {
 	int bs2Boot;
 	int showHiddenFiles;
 	int uiSounds;
+	int uiOverscan;
 	int recentListLevel;	// off, lazy, on
 	int cubebootIntro;
 	int cubebootIntroColor;
