@@ -21,6 +21,7 @@
 extern GXColor defaultColor;
 extern GXColor disabledColor;
 extern GXColor deSelectedColor;
+extern GXColor accentColor;
 extern char txtbuffer[2048];
 
 void init_font(void);

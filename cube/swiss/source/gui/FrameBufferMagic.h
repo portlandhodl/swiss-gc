@@ -43,7 +43,7 @@
 // Animations applied by the video thread when drawing an object
 #define UI_ANIM_NONE      0
 #define UI_ANIM_POP       1	// zoom in from depth when first shown (applies to its children)
-#define UI_ANIM_SWAY      2	// gentle 3D rocking about its centre (this object only)
+#define UI_ANIM_SWAY      2	// flips in, then gently rocks in 3D about its centre (this object only)
 #define UI_ANIM_FILEPANEL 3	// recedes while the home menu is open (applies to its children)
 
 typedef struct uiDrawObj {
@@ -133,6 +133,8 @@ uiDrawObj_t* DrawMenuButtons(int selection);
 uiDrawObj_t* DrawTooltip(const char *tooltip);
 uiDrawObj_t* DrawTitleBar();
 uiDrawObj_t* DrawScene3D();
+uiDrawObj_t* DrawPageHeader(int x, int y, const char *title, int page, int pageCount);
+uiDrawObj_t* DrawSelectionBar(int x1, int y1, int x2, int y2);
 uiDrawObj_t* DrawFilePanel();
 void DrawSetAnimation(uiDrawObj_t *evt, int anim, float cx, float cy);
 void DrawUpdateProgressBar(uiDrawObj_t *evt, int percent);

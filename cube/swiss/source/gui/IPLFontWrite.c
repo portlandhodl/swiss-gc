@@ -21,7 +21,8 @@ static sys_fontheader *font = (sys_fontheader *)fontData;
 GXTexObj fontTexObj;
 GXColor defaultColor = (GXColor) {255,255,255,255};
 GXColor disabledColor = (GXColor) {175,175,182,255};
-GXColor deSelectedColor = (GXColor) {80,80,73,255};
+GXColor deSelectedColor = (GXColor) {120,112,170,255};
+GXColor accentColor = (GXColor) {170,160,255,255};
 
 void init_font(void)
 {

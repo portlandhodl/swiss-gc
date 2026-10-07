@@ -29,6 +29,7 @@
 #include "dolparameters.h"
 #include "cheats.h"
 #include "scene3d.h"
+#include "uisound.h"
 
 #define GUI_MSGBOX_ALPHA 225
 
@@ -113,11 +114,13 @@ enum VideoEventType
 	EV_MENUBUTTONS,
 	EV_TOOLTIP,
 	EV_TITLEBAR,
-	EV_SCENE3D
+	EV_SCENE3D,
+	EV_PAGEHEADER,
+	EV_SELECTBAR
 };
 
 char * typeStrings[] = {"TexObj", "MsgBox", "Image", "Progress", "SelectableButton", "EmptyBox", "TransparentBox",
-						"FileBrowserButton", "VertScrollbar", "StyledLabel", "Container", "MenuButtons", "Tooltip", "TitleBar", "Scene3D"};
+						"FileBrowserButton", "VertScrollbar", "StyledLabel", "Container", "MenuButtons", "Tooltip", "TitleBar", "Scene3D", "PageHeader", "SelectBar"};
 
 typedef struct drawTexObjEvent {
 	GXTexObj *texObj;
@@ -222,6 +225,14 @@ typedef struct drawProgressEvent {
 	int timeremain;
 } drawProgressEvent_t;
 
+typedef struct drawPageHeaderEvent {
+	int x;
+	int y;
+	char *title;
+	int page;
+	int pageCount;
+} drawPageHeaderEvent_t;
+
 typedef struct uiDrawObjQueue {
 	struct uiDrawObj *event;
 	struct uiDrawObjQueue *next;
@@ -300,6 +311,9 @@ static void clearNestedEvent(uiDrawObj_t *event) {
 				//print_debug("Clear Nested EV_TOOLTIP\n");
 				free(((drawTooltipEvent_t*)event->data)->tooltip);
 			}
+		}
+		else if(event->type == EV_PAGEHEADER) {
+			free(((drawPageHeaderEvent_t*)event->data)->title);
 		}
 		//print_debug("Clear Nested event->data\n");
 		free(event->data);
@@ -491,6 +505,16 @@ static void _DrawSimpleBox(int x, int y, int width, int height, int depth, GXCol
 	_drawRect(x+(width/2), y, width/2, height/2, depth, borderColor, ((float)width/32), 0.0f, 0.0f, ((float)height/32));
 	_drawRect(x, y+(height/2), width/2, height/2, depth, borderColor, 0.0f, ((float)width/32), ((float)height/32), 0.0f);
 	_drawRect(x+(width/2), y+(height/2), width/2, height/2, depth, borderColor, ((float)width/32), 0.0f, ((float)height/32), 0.0f);
+}
+
+// Untextured rectangle that follows the current UI transform
+static void _DrawSolidRect(int x, int y, int width, int height, GXColor color) {
+	GX_SetNumTevStages(1);
+	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+	GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+	GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+	_drawRect(x, y, width, height, 0, color, 0.0f, 0.0f, 0.0f, 0.0f);
+	drawInit();
 }
 
 // Internal
@@ -869,6 +893,17 @@ static void _DrawMessageBox(uiDrawObj_t *evt) {
 	GXColor borderColor = THEME_BORDER;
 	
 	_DrawSimpleBox( x1, y1, x2-x1, y2-y1, 0, fillColor, borderColor); 
+	
+	// Coloured accent along the top tells the kind of message at a glance
+	drawMsgBoxEvent_t *data = (drawMsgBoxEvent_t*)evt->data;
+	GXColor accent;
+	switch(data->type) {
+		case D_WARN: accent = (GXColor) {255,190, 70,255}; break;
+		case D_FAIL: accent = (GXColor) {255, 86, 86,255}; break;
+		case D_PASS: accent = (GXColor) { 90,220,120,255}; break;
+		default:     accent = THEME_ACCENT; break;
+	}
+	_DrawSolidRect(x1+16, y1+4, (x2-x1)-32, 3, accent);
 }	
 
 // External
@@ -880,6 +915,12 @@ uiDrawObj_t* DrawMessageBox(int type, const char *msg)
 	event->type = EV_MSGBOX;
 	event->data = eventData;
 	DrawSetAnimation(event, UI_ANIM_POP, 320, 240);
+	if(type == D_FAIL || type == D_WARN) {
+		UISound_Play(SND_ERROR);
+	}
+	else if(type == D_PASS) {
+		UISound_Play(SND_INFO);
+	}
 	
 	// Add child component(s) for label(s)
 	sprintf(txtbuffer, "%s", msg);
@@ -1494,6 +1535,71 @@ uiDrawObj_t* DrawScene3D()
 }
 
 // Internal
+static void _DrawPageHeader(uiDrawObj_t *evt) {
+	drawPageHeaderEvent_t *data = (drawPageHeaderEvent_t*)evt->data;
+	drawString(data->x, data->y, data->title, 0.9f, ALIGN_LEFT, defaultColor);
+	if(data->pageCount > 1) {
+		// One small cube per page, the current one is lit up and spins
+		float t = Scene3D_Time();
+		cube3d_t cubes[data->pageCount];
+		for(int i = 0; i < data->pageCount; i++) {
+			bool current = i == data->page;
+			cubes[i].x = 600.0f - (data->pageCount-1-i)*20.0f;
+			cubes[i].y = data->y + 1.0f;
+			cubes[i].z = 0.0f;
+			UI_TransformPoint(&cubes[i].x, &cubes[i].y, &cubes[i].z);
+			cubes[i].size = current ? 12.0f : 8.0f;
+			cubes[i].rx = 0.5f;
+			cubes[i].ry = current ? t*1.5f : 0.6f;
+			cubes[i].rz = 0.0f;
+			cubes[i].color = current ? (GXColor) {150,128,255,240} : (GXColor) {90,84,170,150};
+			cubes[i].edges = 0.7f;
+		}
+		Scene3D_DrawCubes(cubes, data->pageCount);
+	}
+}
+
+// External
+// Page title with a page indicator on the right, page is 0 based
+uiDrawObj_t* DrawPageHeader(int x, int y, const char *title, int page, int pageCount)
+{
+	drawPageHeaderEvent_t *eventData = calloc(1, sizeof(drawPageHeaderEvent_t));
+	eventData->x = x;
+	eventData->y = y;
+	eventData->title = strdup(title);
+	eventData->page = page;
+	eventData->pageCount = pageCount;
+	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
+	event->type = EV_PAGEHEADER;
+	event->data = eventData;
+	return event;
+}
+
+// Internal
+static void _DrawSelectionBar(uiDrawObj_t *evt) {
+	drawBoxEvent_t *data = (drawBoxEvent_t*)evt->data;
+	float pulse = 0.75f + 0.25f*sinf(Scene3D_Time()*4.0f);
+	GXColor fillColor = THEME_SELECT;
+	fillColor.a = (u8)(fillColor.a * pulse);
+	_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, fillColor, THEME_BORDER);
+}
+
+// External
+// Highlight behind the selected row of a list
+uiDrawObj_t* DrawSelectionBar(int x1, int y1, int x2, int y2)
+{
+	drawBoxEvent_t *eventData = calloc(1, sizeof(drawBoxEvent_t));
+	eventData->x1 = x1;
+	eventData->y1 = y1;
+	eventData->x2 = x2;
+	eventData->y2 = y2;
+	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
+	event->type = EV_SELECTBAR;
+	event->data = eventData;
+	return event;
+}
+
+// Internal
 static void _DrawTitleBar(uiDrawObj_t *evt) {
 	Scene3D_DrawGradientRect(0, 0, 640, 86, (GXColor) {8,6,30,215}, (GXColor) {8,6,30,40});
 	Scene3D_DrawGradientRect(24, 82, 592, 1, THEME_BORDER_DIM, THEME_BORDER_DIM);
@@ -1632,6 +1738,12 @@ static void drawBrowserDock(float alpha) {
 static void _DrawMenuButtons(uiDrawObj_t *evt) {
 	drawMenuButtonsEvent_t *data = (drawMenuButtonsEvent_t*)evt->data;
 	float dt = Scene3D_FrameDelta();
+
+	static bool homeShown = false;
+	if((data->selection >= 0) != homeShown) {
+		homeShown = data->selection >= 0;
+		if(homeShown) UISound_Play(SND_OPEN);
+	}
 
 	// Ease towards the home menu / file browser and the selected entry
 	float target = data->selection >= 0 ? 1.0f : 0.0f;
@@ -2262,7 +2374,9 @@ static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 		composeTransform(videoEvent->xform, true);
 	}
 	else if(videoEvent->anim == UI_ANIM_SWAY) {
-		UI_MakeTransform(local, videoEvent->cx, videoEvent->cy, 0.0f, 0.0f, 0.0f, sinf(Scene3D_Time()*1.3f)*0.35f, 0.0f, 1.0f);
+		float t = (float)ticks_to_millisecs(gettime() - videoEvent->born) / 300.0f;
+		float flip = t < 1.0f ? (1.0f - easeOutBack(t)) * 1.6f : 0.0f;
+		UI_MakeTransform(local, videoEvent->cx, videoEvent->cy, 0.0f, 0.0f, 0.0f, flip + sinf(Scene3D_Time()*1.3f)*0.35f, 0.0f, 1.0f);
 		composeTransform(local, true);
 	}
 
@@ -2309,6 +2423,12 @@ static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 			break;
 		case EV_SCENE3D:
 			_DrawScene3D(videoEvent);
+			break;
+		case EV_PAGEHEADER:
+			_DrawPageHeader(videoEvent);
+			break;
+		case EV_SELECTBAR:
+			_DrawSelectionBar(videoEvent);
 			break;
 		default:
 			break;
@@ -2363,6 +2483,7 @@ static void *videoUpdate(void *videoEventQueue) {
 		}
 		
 		Scene3D_NewFrame();
+		UISound_Poll();
 		GXRModeObj *vmode = getVideoMode();
 		if(vmode->field_rendering) {
 			GX_SetViewportJitter(0.0f, 0.0f, vmode->fbWidth, vmode->efbHeight, 0.0f, 1.0f, VIDEO_GetNextField());
@@ -2445,6 +2566,7 @@ void DrawInit(GXRModeObj *videoMode, bool black) {
 	init_font();
 	init_textures();
 	Scene3D_Init();
+	UISound_Init();
 	uiDrawObj_t *container = DrawContainer();
 	if(!black) {
 		DrawAddChild(container, DrawScene3D());
@@ -2531,6 +2653,7 @@ void DrawLoadBackdrop(DEVICEHANDLER_INTERFACE *device) {
 }
 
 void DrawShutdown() {
+	UISound_Shutdown();
 	mutex_t mutex = _videomutex;
 	_videomutex = LWP_MUTEX_NULL;
 	LWP_MutexDestroy(mutex);

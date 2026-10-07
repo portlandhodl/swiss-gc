@@ -5,6 +5,7 @@
 #include "util.h"
 #include "swiss.h"
 #include "mp3.h"
+#include "gui/uisound.h"
 #include "gui/FrameBufferMagic.h"
 #include "gui/IPLFontWrite.h"
 
@@ -112,7 +113,8 @@ int play_mp3(file_handle *file, int numFiles, int curMP3) {
 
 /* Plays a MP3 file */
 void mp3_player(file_handle** allFiles, int numFiles, file_handle* curFile) {
-	// Initialise the audio subsystem
+	// Initialise the audio subsystem, the MP3 player owns it from now on
+	UISound_Disable();
 	MP3Player_Init();
 	MP3Player_Volume(volume);
 	

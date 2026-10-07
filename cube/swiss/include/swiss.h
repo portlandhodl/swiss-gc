@@ -181,6 +181,7 @@ typedef struct {
 	int gameBrowserType;
 	int bs2Boot;
 	int showHiddenFiles;
+	int uiSounds;
 	int recentListLevel;	// off, lazy, on
 	int cubebootIntro;
 	int cubebootIntroColor;

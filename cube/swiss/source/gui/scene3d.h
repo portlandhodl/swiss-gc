@@ -43,6 +43,7 @@ void UI_SetTransform(Mtx m, bool perspective);
 void UI_GetTransform(Mtx m, bool *perspective);
 void UI_LoadProjection(void);
 void UI_ApplyTransform(Mtx local, Mtx out);
+void UI_TransformPoint(float *x, float *y, float *z);
 
 // Build a transform that rotates a flat UI element about a pivot in 3D
 void UI_MakeTransform(Mtx out, float pivotX, float pivotY, float tx, float ty, float tz, float rotY, float rotX, float scale);

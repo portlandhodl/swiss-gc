@@ -163,6 +163,17 @@ void UI_ApplyTransform(Mtx local, Mtx out)
 	}
 }
 
+// Apply the current UI transform to a point in UI screen space
+void UI_TransformPoint(float *x, float *y, float *z)
+{
+	if (!initialised) Scene3D_Init();
+	guVector v = {*x, *y, *z};
+	guVecMultiply(uiXform, &v, &v);
+	*x = v.x;
+	*y = v.y;
+	*z = v.z;
+}
+
 void UI_MakeTransform(Mtx out, float pivotX, float pivotY, float tx, float ty, float tz, float rotY, float rotX, float scale)
 {
 	Mtx a, b, c;

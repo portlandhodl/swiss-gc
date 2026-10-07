@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <gccore.h>
 #include <ogc/exi.h>
+#include <ogc/lwp_watchdog.h>
 #include <ogc/machine/processor.h>
 #include "deviceHandler.h"
 #include "FrameBufferMagic.h"
@@ -26,6 +27,8 @@
 #define page_nav_y (390)
 #define page_saveexit_y (425)
 #define label_size (0.75f)
+
+static u64 settingsShownAt;
 
 ConfigEntry tempConfig;
 SwissSettings tempSettings;
@@ -95,7 +98,8 @@ static char *tooltips_interface[PAGE_INTERFACE_MAX+1] = {
 	[SET_FILE_MGMT] = "File Management:\n\nWhen enabled, pressing Z on an entry in the file browser will\nallow it to be managed.",
 	[SET_RECENT_LIST] = "Recent List:\n\n(On) - Press Start while browsing to show a recent list.\n(Lazy) - Same as On but list updates only for new entries.\n(Off) - Recent list is completely disabled.\n\nThe lazy/off options exist to minimise SD card writes.",
 	[SET_HIDE_UNK] = "Hide unknown file types:\n\nDisabled - Show all files (default)\nEnabled - Hide unknown file types from being displayed\n\nKnown file types are:\n GameCube Executables (.bin/.dol/.elf)\n Disc images (.gcm/.iso/.nkit.iso/.tgc)\n MP3 Music (.mp3)\n WASP/WKF Flash files (.fzn)\n GameCube Memory Card files (.gci/.gcs/.sav)\n GameCube Executables with parameters appended (.dol+cli)",
-	[SET_FLATTEN_DIR] = "Flatten directory:\n\nFlattens a directory structure matching a glob pattern."
+	[SET_FLATTEN_DIR] = "Flatten directory:\n\nFlattens a directory structure matching a glob pattern.",
+	[SET_UI_SOUNDS] = "Menu Sounds:\n\nPlays short sound effects when moving around and selecting\nitems in the menus."
 };
 
 static char *tooltips_network[PAGE_NETWORK_MAX+1] = {
@@ -177,7 +181,7 @@ void add_tooltip_label(uiDrawObj_t* page, int page_num, int option) {
 
 void drawSettingEntryString(uiDrawObj_t* page, int *y, char *label, char *key, bool selected, bool enabled) {
 	if(selected) {
-		DrawAddChild(page, DrawStyledLabel(20, *y, "\225", label_size, ALIGN_LEFT, enabled ? defaultColor:deSelectedColor));
+		DrawAddChild(page, DrawSelectionBar(22, *y-12, getVideoMode()->fbWidth-52, *y+12));
 	}
 	DrawAddChild(page, DrawStyledLabel(page_x_ofs_key, *y, label, label_size, ALIGN_LEFT, enabled ? defaultColor:deSelectedColor));
 	DrawAddChild(page, DrawStyledLabel(page_x_ofs_val, *y, key, label_size, ALIGN_LEFT, enabled && selected ? defaultColor:deSelectedColor));
@@ -195,6 +199,9 @@ void drawSettingEntryNumeric(uiDrawObj_t* page, int *y, char *label, int num, bo
 
 uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfig) {
 	uiDrawObj_t* page = DrawEmptyBox(20,60, getVideoMode()->fbWidth-20, 460);
+	// The page is rebuilt on every change, only zoom in when the screen opens
+	DrawSetAnimation(page, UI_ANIM_POP, 320, 260);
+	page->born = settingsShownAt;
 	char sramHOffsetStr[8];
 	char uiVModeStr[21];
 	char sramTemperatureStr[8];
@@ -256,7 +263,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		int scrollBarHeight = 90+(settings_per_page*20);
 		int scrollBarTabHeight = (int)((float)scrollBarHeight/(float)SET_PAGE_1_NEXT);
 		DrawAddChild(page, DrawVertScrollBar(getVideoMode()->fbWidth-45, 110, 25, scrollBarHeight, (float)((float)option/(float)(SET_PAGE_1_NEXT-1)),scrollBarTabHeight));
-		DrawAddChild(page, DrawLabel(page_x_ofs_key, 77, "Global Settings (1/6):"));
+		DrawAddChild(page, DrawPageHeader(page_x_ofs_key, 77, "Global Settings", 0, 6));
 		bool tvEnable = swissSettings.aveCompat != AVE_RVL_COMPAT;
 		bool dvdEnable = deviceHandler_getDeviceAvailable(&__device_dvd);
 		bool dtvEnable = !in_range(swissSettings.aveCompat, AVE_N_DOL_COMPAT, AVE_P_DOL_COMPAT);
@@ -292,7 +299,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		}
 	}
 	else if(page_num == PAGE_INTERFACE) {
-		DrawAddChild(page, DrawLabel(page_x_ofs_key, 77, "Interface Settings (2/6):"));
+		DrawAddChild(page, DrawPageHeader(page_x_ofs_key, 77, "Interface Settings", 1, 6));
 		drawSettingEntryString(page, &page_y_ofs, "File Browser Type:", fileBrowserTypeStr[swissSettings.fileBrowserType], option == SET_FILEBROWSER_TYPE, true);
 		drawSettingEntryString(page, &page_y_ofs, "File Browser Type for apps:", fileBrowserTypeStr[swissSettings.appsBrowserType], option == SET_APPSBROWSER_TYPE, true);
 		drawSettingEntryString(page, &page_y_ofs, "File Browser Type for games:", fileBrowserTypeStr[swissSettings.gameBrowserType], option == SET_GAMEBROWSER_TYPE, true);
@@ -303,13 +310,14 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		drawSettingEntryBoolean(page, &page_y_ofs, "Boot without prompts:", swissSettings.autoBoot, option == SET_AUTOBOOT, true);
 		drawSettingEntryString(page, &page_y_ofs, "Load at startup:", getAutoLoadDeviceName(&swissSettings), option == SET_AUTOLOAD, true);
 		drawSettingEntryString(page, &page_y_ofs, "Flatten directory:", swissSettings.flattenDir, option == SET_FLATTEN_DIR, true);
+		drawSettingEntryBoolean(page, &page_y_ofs, "Menu Sounds:", swissSettings.uiSounds, option == SET_UI_SOUNDS, true);
 	}
 	else if(page_num == PAGE_NETWORK) {
 		int settings_per_page = 10;
 		int scrollBarHeight = 90+(settings_per_page*20);
 		int scrollBarTabHeight = (int)((float)scrollBarHeight/(float)SET_PAGE_3_BACK);
 		DrawAddChild(page, DrawVertScrollBar(getVideoMode()->fbWidth-45, 110, 25, scrollBarHeight, (float)((float)option/(float)(SET_PAGE_3_BACK-1)),scrollBarTabHeight));
-		DrawAddChild(page, DrawLabel(page_x_ofs_key, 77, "Network Settings (3/6):"));
+		DrawAddChild(page, DrawPageHeader(page_x_ofs_key, 77, "Network Settings", 2, 6));
 		bool netEnable = net_initialized || bba_exists(LOC_ANY);
 		// TODO settings to a new typedef that ties type etc all together, then draw a "page" of these rather than this at some point.
 		if(option < SET_FTP_USER) {
@@ -338,7 +346,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		}
 	}
 	else if(page_num == PAGE_GAME_GLOBAL) {
-		DrawAddChild(page, DrawLabel(page_x_ofs_key, 77, "Global Game Settings (4/6):"));
+		DrawAddChild(page, DrawPageHeader(page_x_ofs_key, 77, "Global Game Settings", 3, 6));
 		bool enabledVideoPatches = swissSettings.disableVideoPatches < 2;
 		bool emulatedMemoryCard = devices[DEVICE_CUR] == NULL || (devices[DEVICE_CUR]->emulable & EMU_MEMCARD);
 		bool enabledHypervisor = devices[DEVICE_CUR] == NULL || (devices[DEVICE_CUR]->features & FEAT_HYPERVISOR);
@@ -359,7 +367,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		int scrollBarHeight = 90+(settings_per_page*20);
 		int scrollBarTabHeight = (int)((float)scrollBarHeight/(float)SET_PAGE_5_BACK);
 		DrawAddChild(page, DrawVertScrollBar(getVideoMode()->fbWidth-45, 110, 25, scrollBarHeight, (float)((float)option/(float)(SET_PAGE_5_BACK-1)),scrollBarTabHeight));
-		DrawAddChild(page, DrawLabel(page_x_ofs_key, 77, "Default Game Settings (5/6):"));
+		DrawAddChild(page, DrawPageHeader(page_x_ofs_key, 77, "Default Game Settings", 4, 6));
 		bool enabledVideoPatches = swissSettings.disableVideoPatches < 2;
 		bool emulatedAudioStream = devices[DEVICE_CUR] == NULL || (devices[DEVICE_CUR]->emulable & EMU_AUDIO_STREAMING);
 		bool emulatedReadSpeed = devices[DEVICE_CUR] == NULL || (devices[DEVICE_CUR]->emulable & EMU_READ_SPEED);
@@ -399,7 +407,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 		int scrollBarHeight = 90+(settings_per_page*20);
 		int scrollBarTabHeight = (int)((float)scrollBarHeight/(float)SET_PAGE_6_BACK);
 		DrawAddChild(page, DrawVertScrollBar(getVideoMode()->fbWidth-45, 110, 25, scrollBarHeight, (float)((float)option/(float)(SET_PAGE_6_BACK-1)),scrollBarTabHeight));
-		DrawAddChild(page, DrawLabel(page_x_ofs_key, 77, "Current Game Settings (6/6):"));
+		DrawAddChild(page, DrawPageHeader(page_x_ofs_key, 77, "Current Game Settings", 5, 6));
 		bool enabledGamePatches = gameConfig != NULL && !gameConfig->forceCleanBoot;
 		if(enabledGamePatches) {
 			bool enabledVideoPatches = swissSettings.disableVideoPatches < 2;
@@ -665,6 +673,9 @@ void settings_toggle(int page, int option, int direction, ConfigEntry *gameConfi
 			break;
 			case SET_SHOW_HIDDEN:
 				swissSettings.showHiddenFiles ^= 1;
+			break;
+			case SET_UI_SOUNDS:
+				swissSettings.uiSounds ^= 1;
 			break;
 			case SET_HIDE_UNK:
 				swissSettings.hideUnknownFileTypes ^= 1;
@@ -1103,6 +1114,7 @@ void settings_toggle(int page, int option, int direction, ConfigEntry *gameConfi
 
 int show_settings(int page, int option, ConfigEntry *config) {
 	wait_network();
+	settingsShownAt = gettime();
 	// Copy current settings to a temp copy in case the user cancels out
 	if(config != NULL) {
 		memcpy(&tempConfig, config, sizeof(ConfigEntry));

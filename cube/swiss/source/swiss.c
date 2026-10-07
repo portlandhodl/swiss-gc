@@ -2658,10 +2658,14 @@ void select_device(int type)
 	}
 
 	uiDrawObj_t *deviceSelectBox = NULL;
+	u64 shownAt = 0;
 	while (padsButtonsHeld() & BUTTON_A){ VIDEO_WaitVSync (); }
 	while(1) {
-		// Device selector
+		// Device selector, only zoom in the first time it's shown
 		deviceSelectBox = DrawEmptyBox(20,190, getVideoMode()->fbWidth-20, 410);
+		DrawSetAnimation(deviceSelectBox, UI_ANIM_POP, 320, 300);
+		if(shownAt) deviceSelectBox->born = shownAt;
+		else shownAt = deviceSelectBox->born;
 		uiDrawObj_t *selectLabel = DrawStyledLabel(640/2, 195
 													, type == DEVICE_DEST ? "Destination Device" : "Device Selection"
 													, 1.0f, ALIGN_CENTER, defaultColor);
