@@ -34,6 +34,7 @@ extern int curSelection;		      //entry selection
 extern int needsDeviceChange;
 extern int needsRefresh;
 extern int curMenuLocation;
+extern bool gamesMode;
 
 extern char* _menu_array[];
 extern file_handle curFile;

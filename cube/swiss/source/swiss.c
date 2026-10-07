@@ -67,6 +67,7 @@ file_handle curDir;     //filedescriptor for current directory
 
 // Menu related variables
 int curMenuLocation = ON_FILLIST; //where are we on the screen?
+bool gamesMode = false;         //browsing the games collection instead of folders
 int curMenuSelection = 0;	      //menu selection
 int curSelection = 0;		      //entry selection
 int needsDeviceChange = 0;
@@ -516,6 +517,124 @@ void drawFilesCarousel(file_handle** directory, int num_files, uiDrawObj_t *cont
 		}
 		drawCarouselCard(directory, curSelection, card_x1, y_base, card_x2, y_base + (parentLink ? 40 : card_height), containerPanel);
 	}
+}
+
+#define GAMES_COLS 3
+#define GAMES_ROWS 2
+
+// Draws the games collection as a grid of cards
+void drawGamesGrid(file_handle** directory, int num_files, uiDrawObj_t *containerPanel) {
+	static int topRow = 0;
+	int card_w = 186, card_h = 150, gap = 14;
+	int x_base = (getVideoMode()->fbWidth - (GAMES_COLS * card_w + (GAMES_COLS - 1) * gap)) / 2;
+	int y_base = 108;
+	int selRow = curSelection / GAMES_COLS;
+	int numRows = (num_files + GAMES_COLS - 1) / GAMES_COLS;
+
+	// Keep the selected row on screen
+	if(selRow < topRow) topRow = selRow;
+	if(selRow >= topRow + GAMES_ROWS) topRow = selRow - GAMES_ROWS + 1;
+	if(topRow > MAX(0, numRows - GAMES_ROWS)) topRow = MAX(0, numRows - GAMES_ROWS);
+	current_view_start = topRow * GAMES_COLS;
+	current_view_end = MIN(num_files, current_view_start + GAMES_COLS * GAMES_ROWS);
+
+	sprintf(txtbuffer, "Games on %s", devices[DEVICE_CUR]->deviceName);
+	float scale = GetTextScaleToFitInWidthWithMax(txtbuffer, 400, 0.8f);
+	DrawAddChild(containerPanel, DrawStyledLabel(30, 92, txtbuffer, scale, ALIGN_LEFT, defaultColor));
+	sprintf(txtbuffer, "%i of %i", curSelection + 1, num_files);
+	DrawAddChild(containerPanel, DrawStyledLabel(getVideoMode()->fbWidth - 30, 92, txtbuffer, 0.6f, ALIGN_RIGHT, accentColor));
+
+	// The selected card is added last so it can lift above its neighbours
+	for(int pass = 0; pass < 2; pass++) {
+		for(int i = current_view_start; i < current_view_end; i++) {
+			if((i == curSelection) != (pass == 1)) continue;
+			int col = i % GAMES_COLS, row = i / GAMES_COLS - topRow;
+			int x1 = x_base + col * (card_w + gap);
+			int y1 = y_base + row * (card_h + gap);
+			lockFile(directory[i]);
+			populate_meta(directory[i]);
+			uiDrawObj_t *card = DrawGameCard(x1, y1, x1 + card_w, y1 + card_h, directory[i], i == curSelection ? B_SELECTED : B_NOSELECT);
+			directory[i]->uiObj = card;
+			unlockFile(directory[i]);
+			DrawAddChild(containerPanel, card);
+		}
+	}
+}
+
+// Games collection (every disc image on the device, shown as cards)
+uiDrawObj_t* renderGamesGrid(file_handle** directory, int num_files, uiDrawObj_t* filePanel)
+{
+	if(num_files<=0) {
+		needsRefresh=1;
+		return filePanel;
+	}
+	if(curSelection >= num_files) {
+		curSelection = num_files-1;
+	}
+	uiDrawObj_t *loadingBox = DrawProgressLoading(PROGRESS_BOX_TOPRIGHT);
+	DrawPublish(loadingBox);
+	meta_thread_start(loadingBox);
+	while(1) {
+		u32 retraceCount = VIDEO_GetRetraceCount();
+		DrawUpdateProgressLoading(loadingBox, +1);
+		uiDrawObj_t *newPanel = DrawFilePanel();
+		drawGamesGrid(directory, num_files, newPanel);
+		filePanel = DrawRepublish(filePanel, newPanel);
+		DrawUpdateProgressLoading(loadingBox, -1);
+		
+		u32 waitButtons = BUTTON_START|BUTTON_B|BUTTON_A|BUTTON_UP|BUTTON_DOWN|BUTTON_LEFT|BUTTON_RIGHT|BUTTON_L|BUTTON_R;
+		while ((padsStickX() > -16 && padsStickX() < 16) && (padsStickY() > -16 && padsStickY() < 16) && !(padsButtonsHeld() & waitButtons))
+			{ VIDEO_WaitVSync (); }
+		if((padsButtonsHeld() & BUTTON_LEFT) || padsStickX() <= -16) {
+			curSelection = (curSelection > 0) ? curSelection-1 : num_files-1;
+		}
+		if((padsButtonsHeld() & BUTTON_RIGHT) || padsStickX() >= 16) {
+			curSelection = (curSelection + 1) % num_files;
+		}
+		if((padsButtonsHeld() & BUTTON_UP) || padsStickY() >= 16) {
+			curSelection = MAX(0, curSelection - GAMES_COLS);
+		}
+		if((padsButtonsHeld() & BUTTON_DOWN) || padsStickY() <= -16) {
+			curSelection = MIN(num_files-1, curSelection + GAMES_COLS);
+		}
+		if(padsButtonsHeld() & BUTTON_L) {
+			curSelection = MAX(0, curSelection - GAMES_COLS * GAMES_ROWS);
+		}
+		if(padsButtonsHeld() & BUTTON_R) {
+			curSelection = MIN(num_files-1, curSelection + GAMES_COLS * GAMES_ROWS);
+		}
+		
+		if(padsButtonsHeld() & BUTTON_A) {
+			lockFile(directory[curSelection]);
+			memcpy(&curFile, directory[curSelection], sizeof(file_handle));
+			if(canLoadFileType(curFile.name, devices[DEVICE_CUR]->extraExtensions)) {
+				meta_thread_stop();
+				load_file();
+			}
+			memcpy(directory[curSelection], &curFile, sizeof(file_handle));
+			unlockFile(directory[curSelection]);
+			break;
+		}
+		if(padsButtonsHeld() & BUTTON_B) {
+			curMenuLocation = ON_OPTIONS;
+			break;
+		}
+		if((padsButtonsHeld() & BUTTON_START) && swissSettings.recentListLevel > 0) {
+			meta_thread_stop();
+			select_recent_entry();
+			break;
+		}
+		if(padsStickX() <= -16 || padsStickX() >= 16 || padsStickY() <= -16 || padsStickY() >= 16) {
+			VIDEO_WaitForRetrace(retraceCount + lrintf(0.15f * VIDEO_GetRetraceRate()));
+		}
+		else {
+			while (padsButtonsHeld() & waitButtons)
+				{ VIDEO_WaitVSync (); }
+		}
+	}
+	meta_thread_stop();
+	DrawDispose(loadingBox);
+	return filePanel;
 }
 
 // Carousel (one main file in the middle, entries to either side)
@@ -2846,7 +2965,22 @@ void menu_loop()
 		if(devices[DEVICE_CUR] != NULL && needsRefresh) {
 			curMenuLocation=ON_OPTIONS;
 			curSelection=0; curMenuSelection=0;
-			scanFiles();
+			if(gamesMode) {
+				uiDrawObj_t *msgBox = DrawPublish(DrawProgressBar(true, 0, "Finding games\205"));
+				scanGames();
+				DrawDispose(msgBox);
+				if(getSortedDirEntryCount() <= 0) {
+					msgBox = DrawPublish(DrawMessageBox(D_INFO, "No GameCube games were found on this device."));
+					sleep(2);
+					DrawDispose(msgBox);
+					gamesMode = false;
+					memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+					scanFiles();
+				}
+			}
+			else {
+				scanFiles();
+			}
 			if(getCurrentDirEntryCount()<=0) { devices[DEVICE_CUR]->deinit(devices[DEVICE_CUR]->initial); needsDeviceChange=1; break;}
 			needsRefresh = 0;
 			curMenuLocation = ON_FILLIST;
@@ -2860,7 +2994,13 @@ void menu_loop()
 			else if(!fnmatch("*/games", curDir.name, FNM_PATHNAME | FNM_CASEFOLD | FNM_LEADING_DIR)) {
 				fileBrowserType = swissSettings.gameBrowserType;
 			}
+			if(gamesMode) {
+				fileBrowserType = -1;
+				filePanel = renderGamesGrid(getSortedDirEntries(), getSortedDirEntryCount(), filePanel);
+			}
 			switch(fileBrowserType) {
+				case -1:
+					break;
 				default:
 					filePanel = renderFileBrowser(getSortedDirEntries(), getSortedDirEntryCount(), filePanel);
 					break;
@@ -2887,6 +3027,30 @@ void menu_loop()
 			if(btns & BUTTON_A) {
 				//handle menu event
 				switch(curMenuSelection) {
+					case MENU_GAMES:
+						gamesMode = true;
+						if(devices[DEVICE_CUR] == NULL) {
+							needsDeviceChange = 1;
+						}
+						else {
+							memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+							needsRefresh = 1;
+						}
+						break;
+					case MENU_FILES:
+						if(devices[DEVICE_CUR] == NULL) {
+							gamesMode = false;
+							needsDeviceChange = 1;
+						}
+						else if(gamesMode) {
+							gamesMode = false;
+							memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+							needsRefresh = 1;
+						}
+						else {
+							curMenuLocation = ON_FILLIST;
+						}
+						break;
 					case MENU_DEVICE:
 						needsDeviceChange = 1;  //Change from SD->DVD or vice versa
 						break;

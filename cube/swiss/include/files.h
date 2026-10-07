@@ -9,6 +9,7 @@
 int sortFiles(file_handle* dir, int numFiles, file_handle*** sortedDir);
 void freeFiles();
 void scanFiles();
+void scanGames();
 file_handle** getSortedDirEntries();
 file_handle* getCurrentDirEntries();
 int getSortedDirEntryCount();

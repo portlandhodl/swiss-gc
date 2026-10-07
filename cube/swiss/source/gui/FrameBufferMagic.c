@@ -199,6 +199,7 @@ typedef struct drawFileBrowserButtonEvent {
 	int alpha;
 	bool isAutoLoadEntry;
 	bool isCarousel;	// Draw this as a full "card" style
+	bool isGameCard;	// Draw this as a card in the games grid
 	int distFromMiddle;	// 0 = middle card, otherwise how many cards to the left (-) or right (+)
 } drawFileBrowserButtonEvent_t;
 
@@ -585,7 +586,7 @@ static void _DrawSimpleBox(int x, int y, int width, int height, int depth, GXCol
 	}
 
 	_drawBoxLayer(&boxouterTexObj, x, y, width, height, depth,
-		mixColor(borderColor, white, 0.55f, borderColor.a), borderColor, mixColor(borderColor, black, 0.25f, borderColor.a*0.7f));
+		mixColor(borderColor, white, 0.35f, borderColor.a*0.85f), mixColor(borderColor, borderColor, 0, borderColor.a*0.8f), mixColor(borderColor, black, 0.25f, borderColor.a*0.6f));
 
 	if(fillColor.a && bw >= 200 && bh >= 100) {
 		_drawGlassSheen(bx, by, bw, bh);
@@ -601,7 +602,7 @@ static void _DrawGlassGlow(int x, int y, int width, int height, GXColor color)
 	for(int i = 1; i <= 3; i++) {
 		int g = i * 3;
 		GXColor c = color;
-		c.a = (u8)(110.0f * pulse / i);
+		c.a = (u8)(90.0f * pulse / i);
 		_drawBoxLayer(&boxouterTexObj, x-g, y-g, width+g*2, height+g*2, 0, c, c, c);
 	}
 	drawInit();
@@ -1266,7 +1267,74 @@ uiDrawObj_t* DrawContainer()
 }
 
 // Internal
+// Card in the games grid: banner, title, publisher, size and region
+static void _DrawGameCard(drawFileBrowserButtonEvent_t *data) {
+	file_handle *file = data->file;
+	bool selected = data->mode == B_SELECTED;
+	int w = data->x2 - data->x1;
+	int x_mid = data->x1 + w/2;
+
+	if(selected) {
+		_DrawGlassGlow(data->x1, data->y1, w, data->y2-data->y1, THEME_ACCENT);
+	}
+	_DrawSimpleBox(data->x1, data->y1, w, data->y2-data->y1, 0, selected ? THEME_SELECT : THEME_PANEL, selected ? THEME_BORDER : THEME_BORDER_DIM);
+
+	// Banner (96x32) scaled to the card width, or the file type icon until it has loaded
+	int bnr_w = w - 20;
+	int bnr_h = bnr_w / 3;
+	int bnr_x = data->x1 + 10;
+	int bnr_y = data->y1 + 10;
+	if(file->meta && (file->meta->banner || file->meta->fileTypeTexObj)) {
+		GXTexObj *texObj = file->meta->banner ? &file->meta->bannerTexObj : file->meta->fileTypeTexObj;
+		int x = bnr_x, y = bnr_y, bw = bnr_w, bh = bnr_h;
+		if(!file->meta->banner) {
+			bh = bnr_h - 8;
+			bw = bh * GX_GetTexObjWidth(texObj) / GX_GetTexObjHeight(texObj);
+			x = x_mid - bw/2;
+			y = bnr_y + 4;
+		}
+		else {
+			GX_SetNumTevStages(1);
+			GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+		}
+		GX_InvalidateTexAll();
+		GXTlutObj *tlutObj = GX_GetTexObjUserData(texObj);
+		if(tlutObj) GX_LoadTlut(tlutObj, GX_GetTexObjTlut(texObj));
+		GX_LoadTexObj(texObj, GX_TEXMAP0);
+		GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+			GX_Position3f32((float) x, (float) y, 0.0f);           GX_Color4u8(255, 255, 255, data->alpha); GX_TexCoord2f32(0.0f, 0.0f);
+			GX_Position3f32((float) (x+bw), (float) y, 0.0f);      GX_Color4u8(255, 255, 255, data->alpha); GX_TexCoord2f32(1.0f, 0.0f);
+			GX_Position3f32((float) (x+bw), (float) (y+bh), 0.0f); GX_Color4u8(255, 255, 255, data->alpha); GX_TexCoord2f32(1.0f, 1.0f);
+			GX_Position3f32((float) x, (float) (y+bh), 0.0f);      GX_Color4u8(255, 255, 255, data->alpha); GX_TexCoord2f32(0.0f, 1.0f);
+		GX_End();
+		drawInit();
+	}
+
+	// Title and publisher
+	int text_y = bnr_y + bnr_h + 18;
+	float scale = GetTextScaleToFitInWidthWithMax(data->displayName, w - 16, 0.62f);
+	drawString(x_mid, text_y, data->displayName, scale, ALIGN_CENTER, defaultColor);
+	if(file->meta && file->meta->banner) {
+		sprintf(fbTextBuffer, "%.*s", BNR_FULL_TEXT_LEN, file->meta->bannerDesc.fullCompany);
+		scale = GetTextScaleToFitInWidthWithMax(fbTextBuffer, w - 16, 0.45f);
+		drawString(x_mid, text_y + 18, fbTextBuffer, scale, ALIGN_CENTER, accentColor);
+	}
+
+	// Size and region along the bottom
+	formatBytes(fbTextBuffer, file->size, 0, !(file->device->location & LOC_SYSTEM));
+	drawString(data->x1 + 10, data->y2 - 13, fbTextBuffer, 0.42f, ALIGN_LEFT, deSelectedColor);
+	if(file->meta && file->meta->regionTexObj) {
+		drawInit();
+		_DrawTexObjNow(file->meta->regionTexObj, data->x2 - 34, data->y2 - 22, 24, 15, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
+	}
+}
+
+// Internal
 static void _DrawFileBrowserButton(uiDrawObj_t *evt) {
+	if(((drawFileBrowserButtonEvent_t*)evt->data)->isGameCard) {
+		_DrawGameCard((drawFileBrowserButtonEvent_t*)evt->data);
+		return;
+	}
 	
 	drawFileBrowserButtonEvent_t *data = (drawFileBrowserButtonEvent_t*)evt->data;
 	int borderSize = 4;	
@@ -1531,6 +1599,15 @@ uiDrawObj_t* DrawFileBrowserButtonMeta(int x1, int y1, int x2, int y2, const cha
 	return DrawFileBrowserButton(x1, y1, x2, y2, message, file, mode);
 }
 
+uiDrawObj_t* DrawGameCard(int x1, int y1, int x2, int y2, file_handle *file, int mode) {
+	uiDrawObj_t* event = DrawFileBrowserButtonMeta(x1, y1, x2, y2, getRelativeName(file->name), file, mode);
+	((drawFileBrowserButtonEvent_t*)event->data)->isGameCard = true;
+	if(mode == B_SELECTED) {
+		DrawSetAnimation(event, UI_ANIM_LIFT, (x1 + x2) / 2.0f, (y1 + y2) / 2.0f);
+	}
+	return event;
+}
+
 uiDrawObj_t* DrawFileCarouselEntry(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int distFromMiddle) {
 	uiDrawObj_t* event = DrawFileBrowserButtonMeta(x1, y1, x2, y2, message, file, B_SELECTED);
 	drawFileBrowserButtonEvent_t *data = (drawFileBrowserButtonEvent_t*)event->data;
@@ -1744,6 +1821,8 @@ static const struct {
 	const char *desc;
 	GXColor color;
 } homeItems[MENU_MAX] = {
+	[MENU_GAMES]    = {"Games",       "Your GameCube games on this device",     {255, 176,  72, 0}},
+	[MENU_FILES]    = {"Files",       "Browse the folders and files on this device", {176, 112, 255, 0}},
 	[MENU_DEVICE]   = {"Devices",     "Choose where to browse games and files", {120,  92, 255, 0}},
 	[MENU_SETTINGS] = {"Settings",    "Configure Swiss and per-game options",   { 70, 130, 255, 0}},
 	[MENU_INFO]     = {"System Info", "Console, device and version details",    { 40, 190, 210, 0}},
@@ -1753,6 +1832,8 @@ static const struct {
 
 static GXTexObj *homeIcon(int item, float *aspect) {
 	switch(item) {
+		case MENU_GAMES:    *aspect = (float)GX_GetTexObjWidth(&gcmimgTexObj) / GX_GetTexObjHeight(&gcmimgTexObj); return &gcmimgTexObj;
+		case MENU_FILES:    *aspect = (float)GX_GetTexObjWidth(&dirimgTexObj) / GX_GetTexObjHeight(&dirimgTexObj); return &dirimgTexObj;
 		case MENU_DEVICE:   *aspect = (float)BTNDEVICE_WIDTH / BTNDEVICE_HEIGHT;     return &btndeviceTexObj;
 		case MENU_SETTINGS: *aspect = (float)BTNSETTINGS_WIDTH / BTNSETTINGS_HEIGHT; return &btnsettingsTexObj;
 		case MENU_INFO:     *aspect = (float)BTNINFO_WIDTH / BTNINFO_HEIGHT;         return &btninfoTexObj;
@@ -1777,7 +1858,7 @@ static void drawHomeMenu(int selection) {
 		float front = (cosf(theta)+1.0f) * 0.5f;
 		float emph = powf(front, 6.0f);
 		cube3d_t *c = &cubes[i];
-		c->x = 320.0f + sinf(theta)*205.0f;
+		c->x = 320.0f + sinf(theta)*235.0f;
 		c->y = 236.0f - (1.0f-cosf(theta))*22.0f + lift;
 		c->z = (cosf(theta)-1.0f)*190.0f - (1.0f-hb)*300.0f;
 		c->size = 74.0f + 30.0f*emph;
@@ -1843,9 +1924,15 @@ static void drawBrowserDock(float alpha) {
 	GXColor border = THEME_BORDER;
 	border.a = (u8)(border.a*alpha);
 	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*alpha)}, border);
-	sprintf(fbTextBuffer, "(A) Open    (B) Home Menu    (X) Parent Folder%s%s",
-		swissSettings.enableFileManagement ? "    (Z) Manage" : "",
-		swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
+	if(gamesMode) {
+		sprintf(fbTextBuffer, "(A) Play    (B) Home Menu    (L/R) Page%s",
+			swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
+	}
+	else {
+		sprintf(fbTextBuffer, "(A) Open    (B) Home Menu    (X) Parent Folder%s%s",
+			swissSettings.enableFileManagement ? "    (Z) Manage" : "",
+			swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
+	}
 	drawString(320, 452, fbTextBuffer, 0.55f, ALIGN_CENTER, sub);
 }
 
@@ -2487,6 +2574,13 @@ static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 	// Transforms that only apply to this object
 	if(videoEvent->hasXform) {
 		composeTransform(videoEvent->xform, true);
+	}
+	else if(videoEvent->anim == UI_ANIM_LIFT) {
+		float t = (float)ticks_to_millisecs(gettime() - videoEvent->born) / 180.0f;
+		float e = t < 1.0f ? easeOutBack(t) : 1.0f;
+		float sway = sinf(Scene3D_Time()*1.6f) * 0.06f * e;
+		UI_MakeTransform(local, videoEvent->cx, videoEvent->cy, 0.0f, 0.0f, 40.0f*e, sway, 0.0f, 1.0f + 0.04f*e);
+		composeTransform(local, true);
 	}
 	else if(videoEvent->anim == UI_ANIM_SWAY) {
 		float t = (float)ticks_to_millisecs(gettime() - videoEvent->born) / 300.0f;

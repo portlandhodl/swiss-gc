@@ -436,7 +436,7 @@ static void drawCube(const cube3d_t *c)
 		for (int pass = 0; pass < 2; pass++) {
 			// A wide faint line underneath a thin bright one reads as a glowing edge
 			GX_SetLineWidth(pass ? 9 : 36, GX_TO_ZERO);
-			float strength = pass ? 1.0f : 0.25f;
+			float strength = pass ? 1.0f : 0.18f;
 			GX_Begin(GX_LINES, VTXFMT_LIT, 24);
 			for (int e = 0; e < 12; e++) {
 				float a[3], b[3];
@@ -444,7 +444,7 @@ static void drawCube(const cube3d_t *c)
 				cornerOf(edgeList[e][1], b);
 				float mid[3] = {(a[0] + b[0]) * .5f, (a[1] + b[1]) * .5f, (a[2] + b[2]) * .5f};
 				float front = mtxZ(mv, mid) >= centreZ ? 1.0f : 0.35f;
-				float alpha = c->edges * front * strength * c->color.a * 1.4f;
+				float alpha = c->edges * front * strength * c->color.a * 1.15f;
 				u8 al = (u8)(alpha > 255.0f ? 255.0f : alpha);
 				u8 r = (u8)((3 * 255 + c->color.r) / 4), g = (u8)((3 * 255 + c->color.g) / 4), bl = (u8)((3 * 255 + c->color.b) / 4);
 				GX_Position3f32(a[0], a[1], a[2]);

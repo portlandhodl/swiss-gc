@@ -17,7 +17,7 @@
 #define THEME_BG_BOTTOM     ((GXColor) {  5,   4,  18, 255})
 #define THEME_PANEL         ((GXColor) { 46,  38, 120, 150})
 #define THEME_PANEL_DARK    ((GXColor) { 22,  18,  64, 185})
-#define THEME_BORDER        ((GXColor) {196, 188, 255, 235})
+#define THEME_BORDER        ((GXColor) {186, 178, 250, 215})
 #define THEME_BORDER_DIM    ((GXColor) {120, 110, 210, 190})
 #define THEME_SELECT        ((GXColor) {112,  88, 240, 200})
 #define THEME_ACCENT        ((GXColor) {124, 104, 255, 255})
