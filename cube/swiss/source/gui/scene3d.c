@@ -205,6 +205,19 @@ float UI_GetOverscan(void)
 	return uiOverscan;
 }
 
+bool UI_IsPerspective(void)
+{
+	return uiPerspective;
+}
+
+// Round the translation of a flat 2D transform so bitmaps land on whole pixels
+void UI_SnapToPixels(Mtx m)
+{
+	if (uiPerspective) return;
+	m[0][3] = floorf(m[0][3] + 0.5f);
+	m[1][3] = floorf(m[1][3] + 0.5f);
+}
+
 static void applyOverscan(Mtx m)
 {
 	for (int col = 0; col < 4; col++) {
@@ -400,7 +413,7 @@ static void cubeMatrices(const cube3d_t *c, Mtx mv, Mtx rot)
 	guMtxRotRad(rz, 'z', c->rz);
 	guMtxConcat(ry, rx, tmp);
 	guMtxConcat(rz, tmp, rot);
-	guMtxScale(s, c->size, c->size, c->size);
+	guMtxScale(s, c->size * (1.0f + c->squash * 0.5f), c->size * (1.0f - c->squash), c->size * (1.0f + c->squash * 0.5f));
 	guMtxConcat(rot, s, tmp);
 	guMtxTrans(t, c->x - 320.0f, 240.0f - c->y, c->z - CAMERA_DIST);
 	guMtxConcat(t, tmp, mv);
@@ -526,7 +539,7 @@ void Scene3D_DrawBackground(void)
 	Scene3D_DrawGradientRect(0, 0, 640, 260, THEME_BG_TOP, THEME_BG_MID);
 	Scene3D_DrawGradientRect(0, 260, 640, 220, THEME_BG_MID, THEME_BG_BOTTOM);
 
-	cube3d_t cubes[BG_CUBES];
+	cube3d_t cubes[BG_CUBES] = {0};
 	for (int i = 0; i < BG_CUBES; i++) {
 		bgCubes[i].rx += bgCubes[i].vrx * dt;
 		bgCubes[i].ry += bgCubes[i].vry * dt;
@@ -591,7 +604,7 @@ void Scene3D_DrawLogoCube(float x, float y, float size, float alpha)
 	guMtxRotRad(ry, 'y', t * 0.8f);
 	guMtxConcat(ry, rx, rot);
 
-	cube3d_t cubes[8];
+	cube3d_t cubes[8] = {0};
 	float sub = size * 0.46f;
 	float gap = size * 0.25f;
 	for (int i = 0; i < 8; i++) {
@@ -613,8 +626,7 @@ void Scene3D_DrawLogoCube(float x, float y, float size, float alpha)
 	Scene3D_DrawCubes(cubes, 8);
 }
 
-// s0..s1 selects the horizontal part of the texture to show
-void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float s0, float s1, float alpha)
+void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float alpha)
 {
 	Mtx mv, rot;
 	cubeMatrices(cube, mv, rot);
@@ -632,10 +644,10 @@ void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, 
 	else hw *= aspect;
 	u8 a = (u8)(255.0f * alpha * (facing > 1.0f ? 1.0f : facing));
 	GX_Begin(GX_QUADS, VTXFMT_TEX, 4);
-		GX_Position3f32(-hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s0, 0.0f);
-		GX_Position3f32( hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s1, 0.0f);
-		GX_Position3f32( hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s1, 1.0f);
-		GX_Position3f32(-hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(s0, 1.0f);
+		GX_Position3f32(-hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(0.0f, 0.0f);
+		GX_Position3f32( hw,  hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(1.0f, 0.0f);
+		GX_Position3f32( hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(1.0f, 1.0f);
+		GX_Position3f32(-hw, -hh, 0.502f); GX_Color4u8(255, 255, 255, a); GX_TexCoord2f32(0.0f, 1.0f);
 	GX_End();
 	finishPipeline();
 }

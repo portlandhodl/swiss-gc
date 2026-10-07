@@ -527,10 +527,10 @@ void drawGamesCoverflow(file_handle** directory, int num_files, uiDrawObj_t *con
 	current_view_end = MIN(num_files, curSelection + 7);
 
 	sprintf(txtbuffer, "Games on %s", devices[DEVICE_CUR]->deviceName);
-	float scale = GetTextScaleToFitInWidthWithMax(txtbuffer, 400, 0.8f);
-	DrawAddChild(containerPanel, DrawStyledLabel(30, 92, txtbuffer, scale, ALIGN_LEFT, defaultColor));
+	float scale = GetTextScaleToFitInWidthWithMax(txtbuffer, 400, 0.75f);
+	DrawAddChild(containerPanel, DrawStyledLabel(30, 94, txtbuffer, scale, ALIGN_LEFT, defaultColor));
 	sprintf(txtbuffer, "%i of %i", curSelection + 1, num_files);
-	DrawAddChild(containerPanel, DrawStyledLabel(getVideoMode()->fbWidth - 30, 92, txtbuffer, 0.6f, ALIGN_RIGHT, accentColor));
+	DrawAddChild(containerPanel, DrawStyledLabel(getVideoMode()->fbWidth - 30, 94, txtbuffer, 0.625f, ALIGN_RIGHT, accentColor));
 
 	for(int i = current_view_start; i < current_view_end; i++) {
 		lockFile(directory[i]);
@@ -2999,6 +2999,11 @@ void menu_loop()
 			else if(btns & BUTTON_RIGHT){curMenuSelection = (curMenuSelection + 1) % MENU_MAX;	}
 
 			if(btns & BUTTON_A) {
+				// Let the selected cube jump before switching screens
+				DrawHomeActivate(curMenuSelection);
+				while(DrawHomeActivating()) {
+					VIDEO_WaitVSync();
+				}
 				//handle menu event
 				switch(curMenuSelection) {
 					case MENU_GAMES:

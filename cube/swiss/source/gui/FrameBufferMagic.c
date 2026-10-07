@@ -64,6 +64,8 @@ GXTexObj btnsettingsTexObj;
 GXTexObj btninfoTexObj;
 GXTexObj btnrefreshTexObj;
 GXTexObj btnexitTexObj;
+GXTexObj btngamesTexObj;
+GXTexObj btnfilesTexObj;
 GXTexObj boxinnerTexObj;
 GXTexObj boxouterTexObj;
 GXTexObj ntscjTexObj;
@@ -256,6 +258,12 @@ static float homeBlend = 0.0f;	// 0 = file browser, 1 = home menu
 static float ringPos = 0.0f;	// smoothed home menu selection
 static float coverflowPos = -100.0f;	// smoothed cover flow position
 
+// Home menu activation: the cube squashes, jumps with a spin, lands and the screen fades
+#define ACTIVATE_JUMP_END  0.85f	// the next screen is opened from here
+#define ACTIVATE_END       1.25f	// fade back in finished
+static volatile u64 activateStart;
+static volatile int activateItem = -1;
+
 // Add root level uiDrawObj_t
 static uiDrawObj_t* addVideoEvent(uiDrawObj_t *event) {
 	// First entry, make it root
@@ -400,6 +408,8 @@ static void init_textures()
 	TPL_GetTexture(&buttonsTPL, btninfo, &btninfoTexObj);
 	TPL_GetTexture(&buttonsTPL, btnrefresh, &btnrefreshTexObj);
 	TPL_GetTexture(&buttonsTPL, btnexit, &btnexitTexObj);
+	TPL_GetTexture(&buttonsTPL, btngames, &btngamesTexObj);
+	TPL_GetTexture(&buttonsTPL, btnfiles, &btnfilesTexObj);
 	TPL_GetTexture(&buttonsTPL, boxinner, &boxinnerTexObj);
 	TPL_GetTexture(&buttonsTPL, boxouter, &boxouterTexObj);
 	TPL_GetTexture(&imagesTPL, ntscjimg, &ntscjTexObj);
@@ -1298,11 +1308,12 @@ static void _DrawGameCard(drawFileBrowserButtonEvent_t *data) {
 	}
 	_DrawSimpleBox(data->x1, data->y1, w, data->y2-data->y1, 0, selected ? THEME_SELECT : THEME_PANEL, selected ? THEME_BORDER : THEME_BORDER_DIM);
 
-	// Banner (96x32) scaled to the card width, or the file type icon until it has loaded
-	int bnr_w = w - 20;
-	int bnr_h = bnr_w / 3;
-	int bnr_x = data->x1 + 10;
-	int bnr_y = data->y1 + 10;
+	// Banner (96x32) at a whole multiple of its size so it stays sharp, or the file type icon until it has loaded
+	int bnr_scale = MAX(1, (w - 20) / 96);
+	int bnr_w = 96 * bnr_scale;
+	int bnr_h = 32 * bnr_scale;
+	int bnr_x = x_mid - bnr_w/2;
+	int bnr_y = data->y1 + 12;
 	if(file->meta && (file->meta->banner || file->meta->fileTypeTexObj)) {
 		GXTexObj *texObj = file->meta->banner ? &file->meta->bannerTexObj : file->meta->fileTypeTexObj;
 		int x = bnr_x, y = bnr_y, bw = bnr_w, bh = bnr_h;
@@ -1315,6 +1326,9 @@ static void _DrawGameCard(drawFileBrowserButtonEvent_t *data) {
 		else {
 			GX_SetNumTevStages(1);
 			GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+			// Pixel exact when the card faces the viewer, smooth while it is turned
+			bool flat = !UI_IsPerspective() && UI_GetOverscan() == 1.0f;
+			GX_InitTexObjFilterMode(texObj, flat ? GX_NEAR : GX_LINEAR, flat ? GX_NEAR : GX_LINEAR);
 		}
 		GX_InvalidateTexAll();
 		GXTlutObj *tlutObj = GX_GetTexObjUserData(texObj);
@@ -1330,21 +1344,21 @@ static void _DrawGameCard(drawFileBrowserButtonEvent_t *data) {
 	}
 
 	// Title and publisher
-	int text_y = bnr_y + bnr_h + 18;
-	float scale = GetTextScaleToFitInWidthWithMax(data->displayName, w - 16, 0.62f);
+	int text_y = bnr_y + bnr_h + 20;
+	float scale = GetTextScaleToFitInWidthWithMax(data->displayName, w - 16, 0.75f);
 	drawString(x_mid, text_y, data->displayName, scale, ALIGN_CENTER, defaultColor);
 	if(file->meta && file->meta->banner) {
 		sprintf(fbTextBuffer, "%.*s", BNR_FULL_TEXT_LEN, file->meta->bannerDesc.fullCompany);
-		scale = GetTextScaleToFitInWidthWithMax(fbTextBuffer, w - 16, 0.45f);
-		drawString(x_mid, text_y + 18, fbTextBuffer, scale, ALIGN_CENTER, accentColor);
+		scale = GetTextScaleToFitInWidthWithMax(fbTextBuffer, w - 16, 0.5f);
+		drawString(x_mid, text_y + 22, fbTextBuffer, scale, ALIGN_CENTER, accentColor);
 	}
 
 	// Size and region along the bottom
 	formatBytes(fbTextBuffer, file->size, 0, !(file->device->location & LOC_SYSTEM));
-	drawString(data->x1 + 10, data->y2 - 13, fbTextBuffer, 0.42f, ALIGN_LEFT, deSelectedColor);
+	drawString(data->x1 + 12, data->y2 - 14, fbTextBuffer, 0.5f, ALIGN_LEFT, deSelectedColor);
 	if(file->meta && file->meta->regionTexObj) {
 		drawInit();
-		_DrawTexObjNow(file->meta->regionTexObj, data->x2 - 34, data->y2 - 22, 24, 15, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
+		_DrawTexObjNow(file->meta->regionTexObj, data->x2 - 44, data->y2 - 24, 32, 20, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
 	}
 }
 
@@ -1670,8 +1684,13 @@ static void _DrawCoverflow(uiDrawObj_t *evt) {
 				guMtxConcat(m, mirror, tmp);
 				guMtxCopy(tmp, m);
 			}
-			guMtxConcat(base, m, full);
-			UI_SetTransform(full, true);
+			if(pass == 1 && fabsf(rel[i]) < 0.002f) {
+				UI_SetTransform(base, basePerspective);	// settled in the middle, keep it pixel exact
+			}
+			else {
+				guMtxConcat(base, m, full);
+				UI_SetTransform(full, true);
+			}
 			drawInit();
 			_DrawGameCard(card);
 		}
@@ -1821,11 +1840,12 @@ uiDrawObj_t* DrawScene3D()
 // Internal
 static void _DrawPageHeader(uiDrawObj_t *evt) {
 	drawPageHeaderEvent_t *data = (drawPageHeaderEvent_t*)evt->data;
-	drawString(data->x, data->y, data->title, 0.9f, ALIGN_LEFT, defaultColor);
+	drawString(data->x, data->y, data->title, 1.0f, ALIGN_LEFT, defaultColor);
 	if(data->pageCount > 1) {
 		// One small cube per page, the current one is lit up and spins
 		float t = Scene3D_Time();
 		cube3d_t cubes[data->pageCount];
+		memset(cubes, 0, sizeof(cubes));
 		for(int i = 0; i < data->pageCount; i++) {
 			bool current = i == data->page;
 			cubes[i].x = 600.0f - (data->pageCount-1-i)*20.0f;
@@ -1893,21 +1913,21 @@ static void _DrawTitleBar(uiDrawObj_t *evt) {
 
 	drawInit();
 	_DrawImageNow(TEX_SWISS, 80, 32, 96, 32, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-	drawString(186, 39, "for GameCube", 0.55f, ALIGN_LEFT, defaultColor);
-	drawString(186, 56, "version 0.6", 0.55f, ALIGN_LEFT, deSelectedColor);
+	drawString(186, 38, "for GameCube", 0.625f, ALIGN_LEFT, defaultColor);
+	drawString(186, 57, "version 0.6", 0.5f, ALIGN_LEFT, deSelectedColor);
 	
 	sprintf(fbTextBuffer, "commit: %s \267 revision: %s", GIT_COMMIT, GIT_REVISION);
-	drawString(getVideoMode()->fbWidth-36, 56, fbTextBuffer, 0.55f, ALIGN_RIGHT, deSelectedColor);
+	drawString(getVideoMode()->fbWidth-36, 57, fbTextBuffer, 0.5f, ALIGN_RIGHT, deSelectedColor);
 	
 	s8 cputemp = SYS_GetCoreTemperature();
 	if(cputemp >= 0) {
 		sprintf(fbTextBuffer, "%i\260C", cputemp);
-		drawString(getVideoMode()->fbWidth-246, 39, fbTextBuffer, 0.55f, ALIGN_CENTER, defaultColor);
+		drawString(getVideoMode()->fbWidth-246, 38, fbTextBuffer, 0.625f, ALIGN_CENTER, defaultColor);
 	}
 	time_t curtime;
 	if(time(&curtime) != (time_t)-1) {
 		strftime(fbTextBuffer, sizeof(fbTextBuffer), swissSettings.sramLanguage == SYS_LANG_ENGLISH_US ? "%D \267 %r" : "%F \267 %T", localtime(&curtime));
-		drawString(getVideoMode()->fbWidth-36, 39, fbTextBuffer, 0.55f, ALIGN_RIGHT, defaultColor);
+		drawString(getVideoMode()->fbWidth-36, 38, fbTextBuffer, 0.625f, ALIGN_RIGHT, defaultColor);
 	}
 }
 
@@ -1933,13 +1953,10 @@ static const struct {
 	[MENU_EXIT]     = {"Exit",        "Leave Swiss and reboot the console",     {240, 100,  96, 0}},
 };
 
-static GXTexObj *homeIcon(int item, float *aspect, float *s0, float *s1) {
-	*s0 = 0.0f;
-	*s1 = 1.0f;
+static GXTexObj *homeIcon(int item, float *aspect) {
 	switch(item) {
-		// The file type images are "GCM"/"DIR" labels with a pictogram on the right, only show the pictogram
-		case MENU_GAMES:    *aspect = 1.0f; *s0 = 0.65f; *s1 = 0.98f; return &gcmimgTexObj;
-		case MENU_FILES:    *aspect = 1.0f; *s0 = 0.65f; *s1 = 0.98f; return &dirimgTexObj;
+		case MENU_GAMES:    *aspect = 1.0f; return &btngamesTexObj;
+		case MENU_FILES:    *aspect = 1.0f; return &btnfilesTexObj;
 		case MENU_DEVICE:   *aspect = (float)BTNDEVICE_WIDTH / BTNDEVICE_HEIGHT;     return &btndeviceTexObj;
 		case MENU_SETTINGS: *aspect = (float)BTNSETTINGS_WIDTH / BTNSETTINGS_HEIGHT; return &btnsettingsTexObj;
 		case MENU_INFO:     *aspect = (float)BTNINFO_WIDTH / BTNINFO_HEIGHT;         return &btninfoTexObj;
@@ -1953,7 +1970,7 @@ static void drawHomeMenu(int selection) {
 	float t = Scene3D_Time();
 	float hb = homeBlend;
 	float lift = (1.0f-hb) * 80.0f;
-	cube3d_t cubes[MENU_MAX];
+	cube3d_t cubes[MENU_MAX] = {0};
 	int order[MENU_MAX];
 
 	for(int i = 0; i < MENU_MAX; i++) {
@@ -1967,13 +1984,34 @@ static void drawHomeMenu(int selection) {
 		c->x = 320.0f + sinf(theta)*235.0f;
 		c->y = 236.0f - (1.0f-cosf(theta))*22.0f + lift;
 		c->z = (cosf(theta)-1.0f)*190.0f - (1.0f-hb)*300.0f;
-		c->size = 74.0f + 30.0f*emph;
+		// The selected cube comes forward a little
+		c->size = 74.0f + 34.0f*emph;
+		c->z += 45.0f*emph;
 		if(i == selection) {
 			c->size *= 1.0f + 0.03f*sinf(t*4.0f);
 		}
 		c->rx = 0.42f;
 		c->ry = -theta*0.7f + emph*sinf(t*1.4f)*0.2f;
 		c->rz = 0.0f;
+		if(i == activateItem) {
+			float at = (float)ticks_to_millisecs(gettime() - activateStart) / 1000.0f;
+			float jump = 0.0f, spin = 0.0f;
+			if(at < 0.12f) {
+				c->squash = 0.28f * sinf(at / 0.12f * M_PI / 2.0f);	// crouch
+			}
+			else if(at < 0.50f) {
+				float q = (at - 0.12f) / 0.38f;
+				jump = 4.0f * q * (1.0f - q) * 85.0f;				// up and down again
+				spin = (q * q * (3.0f - 2.0f * q)) * 2.0f * M_PI;	// one full turn
+				c->squash = 0.28f * (1.0f - q) * (1.0f - q) - 0.14f * sinf(q * M_PI);
+			}
+			else if(at < 0.70f) {
+				c->squash = 0.22f * sinf((at - 0.50f) / 0.20f * M_PI);	// land
+			}
+			c->y -= jump;
+			c->y += c->size * c->squash * 0.5f;	// keep the bottom on the floor while squashing
+			c->ry += spin;
+		}
 		c->color = homeItems[i].color;
 		c->color.a = (u8)((110.0f + 120.0f*front) * hb);
 		c->edges = 0.5f + 0.5f*emph;
@@ -2001,10 +2039,10 @@ static void drawHomeMenu(int selection) {
 
 	for(int i = 0; i < MENU_MAX; i++) {
 		int item = order[i];
-		float aspect, s0, s1;
-		GXTexObj *icon = homeIcon(item, &aspect, &s0, &s1);
+		float aspect;
+		GXTexObj *icon = homeIcon(item, &aspect);
 		Scene3D_DrawCubes(&cubes[item], 1);
-		Scene3D_DrawCubeIcon(&cubes[item], icon, aspect, s0, s1, hb);
+		Scene3D_DrawCubeIcon(&cubes[item], icon, aspect, hb);
 	}
 
 	GXColor title = (GXColor) {255,255,255,(u8)(255*hb)};
@@ -2013,15 +2051,15 @@ static void drawHomeMenu(int selection) {
 	border.a = (u8)(border.a*hb);
 	drawInit();
 	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*hb)}, border);
-	drawString(320, 356 + lift, homeItems[sel].label, 1.1f, ALIGN_CENTER, title);
-	drawString(320, 384 + lift, homeItems[sel].desc, 0.62f, ALIGN_CENTER, sub);
+	drawString(320, 356 + lift, homeItems[sel].label, 1.0f, ALIGN_CENTER, title);
+	drawString(320, 384 + lift, homeItems[sel].desc, 0.625f, ALIGN_CENTER, sub);
 	if(devices[DEVICE_CUR] != NULL) {
 		sprintf(fbTextBuffer, "Current device: %s", devices[DEVICE_CUR]->deviceName);
-		drawString(320, 108, fbTextBuffer, 0.6f, ALIGN_CENTER, sub);
+		drawString(320, 108, fbTextBuffer, 0.625f, ALIGN_CENTER, sub);
 	}
 	drawString(320, 452, swissSettings.recentListLevel > 0
-		? "\213\233 Select      (A) Open      (B) Back      (Start) Recent"
-		: "\213\233 Select      (A) Open      (B) Back", 0.55f, ALIGN_CENTER, sub);
+		? "\213\233 Select     (A) Open     (B) Back     (Start) Recent"
+		: "\213\233 Select     (A) Open     (B) Back", 0.625f, ALIGN_CENTER, sub);
 }
 
 // Hint bar shown along the bottom while browsing files
@@ -2031,15 +2069,16 @@ static void drawBrowserDock(float alpha) {
 	border.a = (u8)(border.a*alpha);
 	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*alpha)}, border);
 	if(gamesMode) {
-		sprintf(fbTextBuffer, "(A) Play    (B) Home Menu    (L/R) Jump%s",
-			swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
+		sprintf(fbTextBuffer, "(A) Play   (B) Home Menu   (L/R) Jump%s",
+			swissSettings.recentListLevel > 0 ? "   (Start) Recent" : "");
 	}
 	else {
-		sprintf(fbTextBuffer, "(A) Open    (B) Home Menu    (X) Parent Folder%s%s",
-			swissSettings.enableFileManagement ? "    (Z) Manage" : "",
-			swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
+		sprintf(fbTextBuffer, "(A) Open   (B) Home Menu   (X) Parent Folder%s%s",
+			swissSettings.enableFileManagement ? "   (Z) Manage" : "",
+			swissSettings.recentListLevel > 0 ? "   (Start) Recent" : "");
 	}
-	drawString(320, 452, fbTextBuffer, 0.55f, ALIGN_CENTER, sub);
+	float hintScale = GetTextScaleToFitInWidthWithMax(fbTextBuffer, 540, 0.625f);
+	drawString(320, 452, fbTextBuffer, hintScale, ALIGN_CENTER, sub);
 }
 
 // Internal
@@ -2084,6 +2123,36 @@ uiDrawObj_t* DrawMenuButtons(int selection)
 	event->type = EV_MENUBUTTONS;
 	event->data = eventData;
 	return event;
+}
+
+// External
+// Play the jump for the selected home menu cube, wait with DrawHomeActivating() before switching screens
+void DrawHomeActivate(int selection)
+{
+	activateStart = gettime();
+	activateItem = selection;
+}
+
+bool DrawHomeActivating()
+{
+	return activateItem >= 0 && (float)ticks_to_millisecs(gettime() - activateStart) / 1000.0f < ACTIVATE_JUMP_END;
+}
+
+// Fade over everything while the home menu hands over to the next screen
+static void drawActivateFade(void)
+{
+	if(activateItem < 0) return;
+	float at = (float)ticks_to_millisecs(gettime() - activateStart) / 1000.0f;
+	float alpha = 0.0f;
+	if(at >= ACTIVATE_END) {
+		activateItem = -1;
+		return;
+	}
+	if(at > 0.55f && at < ACTIVATE_JUMP_END) alpha = (at - 0.55f) / (ACTIVATE_JUMP_END - 0.55f);
+	else if(at >= ACTIVATE_JUMP_END) alpha = 1.0f - MAX(0.0f, at - 0.95f) / (ACTIVATE_END - 0.95f);
+	if(alpha <= 0.0f) return;
+	GXColor c = (GXColor) {5, 4, 18, (u8)(255.0f * MIN(alpha, 1.0f))};
+	Scene3D_DrawGradientRect(0, 0, 640, 480, c, c);
 }
 
 // External
@@ -2808,6 +2877,8 @@ static void *videoUpdate(void *videoEventQueue) {
 			videoDrawEvent(videoEvent);
 			videoEventQueueEntry = videoEventQueueEntry->next;
 		}
+		UI_ResetTransform();
+		drawActivateFade();
 		
 		//Copy EFB->XFB
 		if(vmode->copy_interlaced == GX_COPY_INTERLACED) {

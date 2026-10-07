@@ -139,6 +139,8 @@ uiDrawObj_t* DrawPageHeader(int x, int y, const char *title, int page, int pageC
 uiDrawObj_t* DrawSelectionBar(int x1, int y1, int x2, int y2);
 uiDrawObj_t* DrawFilePanel();
 void DrawSetAnimation(uiDrawObj_t *evt, int anim, float cx, float cy);
+void DrawHomeActivate(int selection);
+bool DrawHomeActivating();
 void DrawUpdateProgressBar(uiDrawObj_t *evt, int percent);
 void DrawUpdateProgressBarDetail(uiDrawObj_t *evt, int percent, int speed, int timestart, int timeremain);
 void DrawUpdateProgressLoading(uiDrawObj_t *evt, int increment);

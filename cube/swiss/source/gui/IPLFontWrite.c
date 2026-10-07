@@ -125,6 +125,7 @@ void drawString(int x, int y, const char *string, float scale, int align, GXColo
 	guMtxScaleApply(GXmodelView2D, GXmodelView2D, scale, scale, 1);
 	guMtxTransApply(GXmodelView2D, GXmodelView2D, x, y, 0);
 	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
+	UI_SnapToPixels(GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
 	x = 0; y = 0;
 
@@ -183,6 +184,7 @@ void drawStringWithCaret(int x, int y, const char *string, float scale, int alig
 	guMtxScaleApply(GXmodelView2D, GXmodelView2D, scale, scale, 1);
 	guMtxTransApply(GXmodelView2D, GXmodelView2D, x, y, 0);
 	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
+	UI_SnapToPixels(GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
 	x = 0; y = 0;
 
@@ -276,6 +278,7 @@ void drawStringEllipsis(int x, int y, const char *string, float scale, int align
 	guMtxScaleApply(GXmodelView2D, GXmodelView2D, scale, scale, 1);
 	guMtxTransApply(GXmodelView2D, GXmodelView2D, x, y, 0);
 	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
+	UI_SnapToPixels(GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
 	x = 0; y = 0;
 

@@ -30,6 +30,7 @@ typedef struct {
 	float rx, ry, rz;	// rotation in radians
 	GXColor color;		// base colour, alpha is opacity
 	float edges;		// 0..1 brightness of the highlighted edges
+	float squash;		// > 0 squashes, < 0 stretches along the cube's own y axis
 } cube3d_t;
 
 void Scene3D_Init(void);
@@ -45,6 +46,8 @@ void UI_LoadProjection(void);
 void UI_ApplyTransform(Mtx local, Mtx out);
 void UI_TransformPoint(float *x, float *y, float *z);
 void UI_SetOverscan(float scale);
+void UI_SnapToPixels(Mtx m);
+bool UI_IsPerspective(void);
 float UI_GetOverscan(void);
 
 // Build a transform that rotates a flat UI element about a pivot in 3D
@@ -53,7 +56,7 @@ void UI_MakeTransform(Mtx out, float pivotX, float pivotY, float tx, float ty, f
 void Scene3D_DrawBackground(void);
 void Scene3D_DrawCubes(cube3d_t *cubes, int count);
 void Scene3D_DrawLogoCube(float x, float y, float size, float alpha);
-void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float s0, float s1, float alpha);
+void Scene3D_DrawCubeIcon(const cube3d_t *cube, GXTexObj *texObj, float aspect, float alpha);
 void Scene3D_DrawGlow(GXTexObj *texObj, float x, float y, float z, float w, float h, GXColor color);
 void Scene3D_DrawReflections(const cube3d_t *cubes, int count, float floorY, float strength);
 GXTexObj *Scene3D_GlowTexture(void);
