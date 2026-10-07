@@ -3,6 +3,7 @@
 [![Build Status](https://github.com/emukidid/swiss-gc/actions/workflows/continuous-integration-workflow.yml/badge.svg)](https://github.com/emukidid/swiss-gc/actions/workflows/continuous-integration-workflow.yml)
 
 ## Table of Contents
+- [This Fork: 3D Interface](#this-fork-3d-interface)
 - [Purpose](#purpose)
 	- [Main Features](#main-features)
 	- [Requirements](#requirements)
@@ -10,6 +11,24 @@
 - [Navigating Swiss](#navigating-swiss)
 	- [Controls](#controls)
 	- [Swiss UI](#swiss-ui)
+
+## This Fork: 3D Interface
+This fork replaces the flat Swiss interface with a 3D one inspired by the GameCube main menu. Everything else in Swiss works as upstream.
+
+![Home menu](docs/screenshots/home-menu.png)
+
+*The home menu scene, rendered in Dolphin by a small test program that uses the same `gui/scene3d.c` drawing code and menu icons as Swiss. Swiss itself does not currently start in Dolphin, so this is not a capture of the full Swiss screen; text, panels and hints are not shown.*
+
+- **Home menu**: the main sections are glass cubes on a rotating ring above a glossy, reflective floor. The selected cube comes forward and glows; pressing A makes it crouch, jump with a spin and land before the screen fades over to the chosen section. Sections: Games, Files, Devices, Settings, System Info, Refresh and Exit.
+- **Games**: every disc image (`.iso`, `.gcm`, `.tgc`, `.gcz`, `.rvz`) found up to three folders deep on the current device, shown as an iTunes style cover flow of cards with the game's banner, title, publisher, size and region. The cards glide to the new selection and are reflected on the floor.
+- **Files**: the regular Swiss file browser. The list recedes into the scene when the home menu opens, the carousel browser turns its side cards in 3D.
+- **Glass theme**: frosted glass panels with a specular highlight, bevelled edges, soft shadows and an occasional sheen, glowing selections, glass cubes with fresnel shading and glowing edges, and an animated background of tumbling cubes and drifting light.
+- **Animated dialogs**: messages and progress boxes zoom in from depth, settings and info pages show their page as small spinning cubes, the device picker image flips in.
+- **Menu sounds**: short bell style sound effects generated at startup and mixed straight into the audio interface (no DSP or ARAM use, so booting games is unaffected). Can be turned off with *Menu Sounds* in the Interface settings.
+- **Menu Overscan**: shrinks the menus by 0-10% towards the centre for TVs that cut off the edges of the picture (Interface settings).
+- **GameCube Intro**: optional original boot animation before Swiss via [cubeboot](https://github.com/OffBroadway/cubeboot) (Global settings).
+
+Building: `docker/build.sh dev` produces `cube/swiss/swiss.dol` using the same image as the CI (see `docker/`).
 
 ## Purpose
 Swiss aims to be an all-in-one homebrew utility for the Nintendo GameCube.
@@ -67,20 +86,24 @@ Note: Specific devices will have specific locations/executable file variants tha
 | ----------------------------- | ----------------------- |
 | Control Stick or +Control Pad | Navigate through the UI |
 | A Button                      | Select                  |
-| B Button                      | Enter/Exit bottom pane  |
+| B Button                      | Open/close the home menu |
 | X Button                      | Move back up a folder   |
 | Z Button                      | Manage file or folder   |
 | L Button                      | Move up a page          |
 | R Button                      | Move down a page        |
 | Start/Pause                   | Access recent list      |
 
+In the Games cover flow, left/right moves one game, up/down or L/R jumps five and holding the Control Stick scrolls continuously.
+
 ### Swiss UI
 - The top heading shows the version number, commit hash, and revision number of Swiss.
 - The left panes show what device you are using.
 - The largest portion is the Swiss file browser, through which you can navigate files and folders. The top of every folder includes a `..` option, and selecting this moves you back up a folder.
-- The bottom pane, from the left:
-	- Device Selection
-	- Global Settings, Network Settings, Global Game Settings, Default Game Settings, and Current Game Settings
-	- System Info, Device Info, Version Info, and Greetings
-	- Return to top of file system
-	- Restart GameCube
+- The home menu (B), around the ring:
+	- Games: cover flow of the games on the current device
+	- Files: the file browser
+	- Devices: device selection
+	- Settings: Global Settings, Interface Settings, Network Settings, Global Game Settings, Default Game Settings, and Current Game Settings
+	- System Info: System Info, Device Info, Hotplug Info, Version Info, and Greetings
+	- Refresh: return to top of file system
+	- Exit: restart GameCube
