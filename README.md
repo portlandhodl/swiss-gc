@@ -15,6 +15,10 @@
 ## This Fork: 3D Interface
 This fork replaces the flat Swiss interface with a 3D one inspired by the GameCube main menu. Everything else in Swiss works as upstream.
 
+![Exploring Swiss](docs/media/swiss-explore.gif)
+
+*A recording of Swiss: the home menu, the Games cover flow, the file browser and the settings pages.*
+
 ![Home menu](docs/screenshots/home-menu.png)
 
 *The home menu scene, rendered in Dolphin by a small test program that uses the same `gui/scene3d.c` drawing code and menu icons as Swiss. Swiss itself does not currently start in Dolphin, so this is not a capture of the full Swiss screen; text, panels and hints are not shown.*
