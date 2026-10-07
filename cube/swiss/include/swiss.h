@@ -34,6 +34,7 @@ extern int curSelection;		      //entry selection
 extern int needsDeviceChange;
 extern int needsRefresh;
 extern int curMenuLocation;
+extern bool gamesMode;
 
 extern char* _menu_array[];
 extern file_handle curFile;
@@ -181,6 +182,8 @@ typedef struct {
 	int gameBrowserType;
 	int bs2Boot;
 	int showHiddenFiles;
+	int uiSounds;
+	int uiOverscan;
 	int recentListLevel;	// off, lazy, on
 	int cubebootIntro;
 	int cubebootIntroColor;

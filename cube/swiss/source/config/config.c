@@ -202,6 +202,8 @@ int config_update_global(bool checkConfigDevice) {
 	fprintf(fp, "BBAGateway=%s\r\n", swissSettings.bbaGateway);
 	fprintf(fp, "BBAUseDHCP=%s\r\n", swissSettings.bbaUseDhcp ? "Yes":"No");
 	fprintf(fp, "ShowHiddenFiles=%s\r\n", swissSettings.showHiddenFiles ? "Yes":"No");
+	fprintf(fp, "UISounds=%s\r\n", swissSettings.uiSounds ? "Yes":"No");
+	fprintf(fp, "UIOverscan=%i\r\n", swissSettings.uiOverscan);
 	fprintf(fp, "RecentListLevel=%s\r\n", recentListLevelStr[swissSettings.recentListLevel]);
 	fprintf(fp, "GameCube Intro=%s\r\n", swissSettings.cubebootIntro ? "Yes":"No");
 	fprintf(fp, "GameCube Intro Color=%s\r\n", cubebootColorStr[swissSettings.cubebootIntroColor]);
@@ -626,6 +628,12 @@ void config_parse_legacy(char *configData, void (*progress_indicator)(char*, int
 				}
 				else if(!strcmp("ShowHiddenFiles", name)) {
 					swissSettings.showHiddenFiles = !strcmp("Yes", value);
+				}
+				else if(!strcmp("UISounds", name)) {
+					swissSettings.uiSounds = !strcmp("Yes", value);
+				}
+				else if(!strcmp("UIOverscan", name)) {
+					swissSettings.uiOverscan = MIN(MAX(atoi(value), 0), 10);
 				}
 				else if(!strcmp("RecentListLevel", name)) {
 					for(int i = 0; i < 3; i++) {
@@ -1059,6 +1067,12 @@ void config_parse_global(char *configData) {
 				}
 				else if(!strcmp("ShowHiddenFiles", name)) {
 					swissSettings.showHiddenFiles = !strcmp("Yes", value);
+				}
+				else if(!strcmp("UISounds", name)) {
+					swissSettings.uiSounds = !strcmp("Yes", value);
+				}
+				else if(!strcmp("UIOverscan", name)) {
+					swissSettings.uiOverscan = MIN(MAX(atoi(value), 0), 10);
 				}
 				else if(!strcmp("RecentListLevel", name)) {
 					for(int i = 0; i < 3; i++) {

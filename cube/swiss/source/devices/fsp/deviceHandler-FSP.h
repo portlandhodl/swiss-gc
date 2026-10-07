@@ -10,6 +10,7 @@
 #include "../deviceHandler.h"
 
 extern DEVICEHANDLER_INTERFACE __device_fsp;
+extern bool fsp_ssp_supported;
 
 extern bool deviceHandler_FSP_test();
 

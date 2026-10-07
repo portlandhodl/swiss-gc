@@ -13,6 +13,7 @@
 #include <ogcsys.h>
 #include <string.h>
 #include "IPLFontWrite.h"
+#include "scene3d.h"
 
 static u8 fontData[SYS_FONTSIZE_ANSI] ATTRIBUTE_ALIGN (32);
 static sys_fontheader *font = (sys_fontheader *)fontData;
@@ -20,7 +21,8 @@ static sys_fontheader *font = (sys_fontheader *)fontData;
 GXTexObj fontTexObj;
 GXColor defaultColor = (GXColor) {255,255,255,255};
 GXColor disabledColor = (GXColor) {175,175,182,255};
-GXColor deSelectedColor = (GXColor) {80,80,73,255};
+GXColor deSelectedColor = (GXColor) {120,112,170,255};
+GXColor accentColor = (GXColor) {170,160,255,255};
 
 void init_font(void)
 {
@@ -33,7 +35,6 @@ void init_font(void)
 
 void drawFontInit(void)
 {
-	Mtx44 GXprojection2D;
 	Mtx GXmodelView2D;
 
 	// Reset various parameters from gfx plugin
@@ -43,11 +44,12 @@ void drawFontInit(void)
 
 	guMtxIdentity(GXmodelView2D);
 	GX_LoadTexMtxImm(GXmodelView2D,GX_TEXMTX0,GX_MTX2x4);
+	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
-	guOrtho(GXprojection2D, 0, 480, 0, 640, 0, 1);
-	GX_LoadProjectionMtx(GXprojection2D, GX_ORTHOGRAPHIC);
+	UI_LoadProjection();
 
 	GX_SetZMode(GX_DISABLE,GX_ALWAYS,GX_FALSE);
+	GX_SetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
 
 	GX_ClearVtxDesc();
 	GX_SetVtxDesc(GX_VA_PNMTXIDX, GX_PNMTX0);
@@ -91,10 +93,19 @@ void drawFontInit(void)
 	GX_SetCullMode (GX_CULL_NONE);
 }
 
+// Soft drop shadow so text stays readable over the glass panels
+static bool shadowPass = false;
+#define SHADOW_COLOR(c) ((GXColor) {0, 0, 16, (u8)((c).a * 3 / 5)})
+
 void drawString(int x, int y, const char *string, float scale, int align, GXColor fontColor)
 {
 	if(string == NULL) {
 		return;
+	}
+	if(!shadowPass && fontColor.a) {
+		shadowPass = true;
+		drawString(x + 1, y + 2, string, scale, align, SHADOW_COLOR(fontColor));
+		shadowPass = false;
 	}
 	drawFontInit();
 	Mtx GXmodelView2D;
@@ -113,6 +124,8 @@ void drawString(int x, int y, const char *string, float scale, int align, GXColo
 	guMtxTrans(GXmodelView2D, -(align*strWidth)/2, -strHeight/2, 0);
 	guMtxScaleApply(GXmodelView2D, GXmodelView2D, scale, scale, 1);
 	guMtxTransApply(GXmodelView2D, GXmodelView2D, x, y, 0);
+	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
+	UI_SnapToPixels(GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
 	x = 0; y = 0;
 
@@ -148,6 +161,11 @@ void drawStringWithCaret(int x, int y, const char *string, float scale, int alig
 	if(string == NULL) {
 		string = "";
 	}
+	if(!shadowPass && fontColor.a) {
+		shadowPass = true;
+		drawStringWithCaret(x + 1, y + 2, string, scale, align, SHADOW_COLOR(fontColor), caretPosition, SHADOW_COLOR(caretColor));
+		shadowPass = false;
+	}
 	drawFontInit();
 	Mtx GXmodelView2D;
 	int strWidth = 0;
@@ -165,6 +183,8 @@ void drawStringWithCaret(int x, int y, const char *string, float scale, int alig
 	guMtxTrans(GXmodelView2D, -(align*strWidth)/2, -strHeight/2, 0);
 	guMtxScaleApply(GXmodelView2D, GXmodelView2D, scale, scale, 1);
 	guMtxTransApply(GXmodelView2D, GXmodelView2D, x, y, 0);
+	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
+	UI_SnapToPixels(GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
 	x = 0; y = 0;
 
@@ -230,6 +250,11 @@ void drawStringEllipsis(int x, int y, const char *string, float scale, int align
 	if(string == NULL) {
 		return;
 	}
+	if(!shadowPass && fontColor.a) {
+		shadowPass = true;
+		drawStringEllipsis(x + 1, y + 2, string, scale, align, SHADOW_COLOR(fontColor), rotateVertical, maxSize);
+		shadowPass = false;
+	}
 	drawFontInit();
 	Mtx GXmodelView2D;
 	if(rotateVertical) {
@@ -252,6 +277,8 @@ void drawStringEllipsis(int x, int y, const char *string, float scale, int align
 	guMtxApplyTrans(GXmodelView2D, GXmodelView2D, -(align*strWidth)/2, -strHeight/2, 0);
 	guMtxScaleApply(GXmodelView2D, GXmodelView2D, scale, scale, 1);
 	guMtxTransApply(GXmodelView2D, GXmodelView2D, x, y, 0);
+	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
+	UI_SnapToPixels(GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
 	x = 0; y = 0;
 

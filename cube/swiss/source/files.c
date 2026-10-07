@@ -113,6 +113,59 @@ void scanFiles() {
 	memcpy(&curFile, &curDir, sizeof(file_handle));
 }
 
+#define GAMES_MAX       512
+#define GAMES_MAX_DEPTH 3
+
+static bool isGameImage(char *name) {
+	return endsWith(name, ".iso") || endsWith(name, ".gcm") || endsWith(name, ".tgc")
+		|| endsWith(name, ".gcz") || endsWith(name, ".rvz");
+}
+
+static void collectGames(file_handle* dir, int depth, file_handle** games, int* count) {
+	file_handle* entries = NULL;
+	int numEntries = devices[DEVICE_CUR]->readDir(dir, &entries, -1);
+	for(int i = 0; i < numEntries && *count < GAMES_MAX; i++) {
+		char *name = getRelativeName(entries[i].name);
+		if(entries[i].fileType == IS_DIR) {
+			if(depth > 0 && *name != '.' && strcasecmp(name, "swiss") && strcasecmp(name, "System Volume Information")) {
+				collectGames(&entries[i], depth - 1, games, count);
+			}
+		}
+		else if(entries[i].fileType == IS_FILE && isGameImage(entries[i].name)) {
+			if(!(*count % 32)) {
+				*games = reallocarray(*games, *count + 32, sizeof(file_handle));
+			}
+			memcpy(&(*games)[(*count)++], &entries[i], sizeof(file_handle));
+		}
+	}
+	free(entries);
+}
+
+static int gameComparator(const void *a1, const void *b1)
+{
+	const file_handle* a = *(const file_handle **)a1;
+	const file_handle* b = *(const file_handle **)b1;
+	return strcasecmp(getRelativeName((char *)a->name), getRelativeName((char *)b->name));
+}
+
+// Fill the directory listing with every disc image found on the current device
+void scanGames() {
+	freeFiles();
+	memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+	print_debug("Scanning for games: %s\n", curDir.name);
+	collectGames(&curDir, GAMES_MAX_DEPTH, &curDirEntries, &curDirEntryCount);
+	print_debug("Found %i games\n", curDirEntryCount);
+
+	sortedDirEntries = calloc(curDirEntryCount ? curDirEntryCount : 1, sizeof(file_handle*));
+	for(int i = 0; i < curDirEntryCount; i++) {
+		sortedDirEntries[i] = &curDirEntries[i];
+	}
+	qsort(sortedDirEntries, curDirEntryCount, sizeof(file_handle*), gameComparator);
+	sortedDirEntryCount = curDirEntryCount;
+	curSelection = 0;
+	memcpy(&curFile, &curDir, sizeof(file_handle));
+}
+
 file_handle** getSortedDirEntries() {
 	return sortedDirEntries;
 }

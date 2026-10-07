@@ -364,8 +364,8 @@ int install_code(int final)
 		if (devices[DEVICE_PATCHES] != &__device_fsp) {
 			switch (devices[DEVICE_CUR]->emulated()) {
 				case EMU_READ | EMU_BUS_ARBITER | EMU_NO_PAUSING:
-					patch     = fsp_bin;
-					patchSize = fsp_bin_size;
+					patch     = fsp_ssp_supported ? ssp_bin : fsp_bin;
+					patchSize = fsp_ssp_supported ? ssp_bin_size : fsp_bin_size;
 					break;
 				default:
 					return ENOSYS;
@@ -373,22 +373,22 @@ int install_code(int final)
 		} else {
 			switch (devices[DEVICE_CUR]->emulated()) {
 				case EMU_READ | EMU_BUS_ARBITER | EMU_NO_PAUSING:
-					patch     = fsp_bin;
-					patchSize = fsp_bin_size;
+					patch     = fsp_ssp_supported ? ssp_bin : fsp_bin;
+					patchSize = fsp_ssp_supported ? ssp_bin_size : fsp_bin_size;
 					break;
 				case EMU_READ | EMU_AUDIO_STREAMING | EMU_BUS_ARBITER | EMU_NO_PAUSING:
-					patch     = fsp_dtk_bin;
-					patchSize = fsp_dtk_bin_size;
+					patch     = fsp_ssp_supported ? ssp_dtk_bin : fsp_dtk_bin;
+					patchSize = fsp_ssp_supported ? ssp_dtk_bin_size : fsp_dtk_bin_size;
 					break;
 				case EMU_READ | EMU_ETHERNET | EMU_BUS_ARBITER | EMU_NO_PAUSING:
-					patch     = fsp_eth_bin;
-					patchSize = fsp_eth_bin_size;
+					patch     = fsp_ssp_supported ? ssp_eth_bin : fsp_eth_bin;
+					patchSize = fsp_ssp_supported ? ssp_eth_bin_size : fsp_eth_bin_size;
 					break;
 				default:
 					return ENOSYS;
 			}
 		}
-		print_debug("Installing Patch for File Service Protocol\n");
+		print_debug("Installing Patch for %s\n", fsp_ssp_supported ? "Swiss Streaming Protocol" : "File Service Protocol");
 	}
 	// GC Loader
 	else if(devices[DEVICE_CUR] == &__device_gcloader) {

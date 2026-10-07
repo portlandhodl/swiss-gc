@@ -270,6 +270,7 @@ int main(int argc, char *argv[])
 	swissSettings.appsBrowserType = BROWSER_FULLWIDTH;
 	swissSettings.gameBrowserType = BROWSER_FULLWIDTH;
 	swissSettings.recentListLevel = 2;
+	swissSettings.uiSounds = 1;
 	memset(&swissSettings.recent[0][0], 0, PATHNAME_MAX);
 	config_init_environ();
 

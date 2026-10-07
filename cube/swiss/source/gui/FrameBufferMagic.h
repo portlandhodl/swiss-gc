@@ -27,24 +27,37 @@
 #define PROGRESS_BOX_BOTTOMLEFT 0
 #define PROGRESS_BOX_TOPRIGHT 1
 
-#define MENU_MAX 5
+#define MENU_MAX 7
 #define MENU_NOSELECT -1
-#define MENU_DEVICE 0
-#define MENU_SETTINGS 1
-#define MENU_INFO 2
-#define MENU_REFRESH 3
-#define MENU_EXIT 4
+#define MENU_GAMES 0
+#define MENU_FILES 1
+#define MENU_DEVICE 2
+#define MENU_SETTINGS 3
+#define MENU_INFO 4
+#define MENU_REFRESH 5
+#define MENU_EXIT 6
 
 #include "images_tpl.h"
 #include "images.h"
 #include "buttons_tpl.h"
 #include "buttons.h"
 
+// Animations applied by the video thread when drawing an object
+#define UI_ANIM_NONE      0
+#define UI_ANIM_POP       1	// zoom in from depth when first shown (applies to its children)
+#define UI_ANIM_SWAY      2	// flips in, then gently rocks in 3D about its centre (this object only)
+#define UI_ANIM_FILEPANEL 3	// recedes while the home menu is open (applies to its children)
+
 typedef struct uiDrawObj {
     int type;
 	void *data;
 	struct uiDrawObj *child;
 	bool disposed;
+	int anim;
+	u64 born;
+	float cx, cy;		// animation pivot
+	bool hasXform;		// static 3D transform for this object only
+	Mtx xform;
 } uiDrawObj_t;
 
 enum TextureId
@@ -121,6 +134,13 @@ uiDrawObj_t* DrawDynamicLabel(int x, int y, const char *(*getString)(void), floa
 uiDrawObj_t* DrawMenuButtons(int selection);
 uiDrawObj_t* DrawTooltip(const char *tooltip);
 uiDrawObj_t* DrawTitleBar();
+uiDrawObj_t* DrawScene3D();
+uiDrawObj_t* DrawPageHeader(int x, int y, const char *title, int page, int pageCount);
+uiDrawObj_t* DrawSelectionBar(int x1, int y1, int x2, int y2);
+uiDrawObj_t* DrawFilePanel();
+void DrawSetAnimation(uiDrawObj_t *evt, int anim, float cx, float cy);
+void DrawHomeActivate(int selection);
+bool DrawHomeActivating();
 void DrawUpdateProgressBar(uiDrawObj_t *evt, int percent);
 void DrawUpdateProgressBarDetail(uiDrawObj_t *evt, int percent, int speed, int timestart, int timeremain);
 void DrawUpdateProgressLoading(uiDrawObj_t *evt, int increment);
@@ -132,6 +152,7 @@ uiDrawObj_t* DrawRepublish(uiDrawObj_t *old, uiDrawObj_t *new);
 void DrawDispose(uiDrawObj_t *evt);
 uiDrawObj_t* DrawFileBrowserButton(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int mode);
 uiDrawObj_t* DrawFileBrowserButtonMeta(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int mode);
+uiDrawObj_t* DrawCoverflow(file_handle **files, int numFiles, int selected);
 uiDrawObj_t* DrawFileCarouselEntry(int x1, int y1, int x2, int y2, const char *message, file_handle *file, int distFromMiddle);
 uiDrawObj_t* DrawVertScrollBar(int x, int y, int width, int height, float scrollPercent, int scrollHeight);
 void DrawArgsSelector(const char *fileName);

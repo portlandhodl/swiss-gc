@@ -20,6 +20,10 @@
 
 extern int net_initialized;
 static FSP_SESSION *fsp_session;
+bool fsp_ssp_supported;
+
+#define SSP_OP_HELLO 0xA0
+#define SSP_VERSION  1
 
 file_handle initial_FSP = {
 	.name     = "fsp:/",
@@ -220,6 +224,40 @@ s32 deviceHandler_FSP_setupFile(file_handle* file, file_handle* file2, Executabl
 	return 1;
 }
 
+// Ask the server whether it also speaks the Swiss Streaming Protocol, which the
+// in-game patch can use instead of FSP for faster disc reads.
+static bool ssp_probe(const char *host, unsigned short port) {
+	struct sockaddr_in addr = {
+		.sin_family = AF_INET,
+		.sin_port = port ? port : 21,
+	};
+	if(!inet_aton(host, &addr.sin_addr))
+		return false;
+	
+	int fd = net_socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+	if(fd < 0)
+		return false;
+	net_connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+	
+	u8 hello[12] = {SSP_OP_HELLO, SSP_VERSION};
+	u8 reply[64];
+	bool supported = false;
+	for(int i = 0; i < 3 && !supported; i++) {
+		net_send(fd, hello, sizeof(hello), 0);
+		
+		fd_set mask;
+		FD_ZERO(&mask);
+		FD_SET(fd, &mask);
+		struct timeval timeout = {.tv_sec = 0, .tv_usec = 200000};
+		if(net_select(fd + 1, &mask, NULL, NULL, &timeout) > 0) {
+			int ret = net_recv(fd, reply, sizeof(reply), 0);
+			supported = ret >= (int)sizeof(hello) && reply[0] == SSP_OP_HELLO && reply[1] >= SSP_VERSION;
+		}
+	}
+	net_close(fd);
+	return supported;
+}
+
 s32 deviceHandler_FSP_init(file_handle* file) {
 	if(!init_network()) {
 		file->status = E_NONET;
@@ -233,6 +271,8 @@ s32 deviceHandler_FSP_init(file_handle* file) {
 	}
 	fsp_session->timeout = 10000;
 	fsp_session->maxdelay = 1000;
+	fsp_ssp_supported = ssp_probe(swissSettings.fspHostIp, swissSettings.fspPort);
+	print_debug("SSP %s by FSP server\n", fsp_ssp_supported ? "supported" : "not supported");
 	
 	u8 dirpro = 0;
 	int ret;

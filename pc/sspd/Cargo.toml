@@ -1,0 +1,11 @@
+[package]
+name = "sspd"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "FSP + Swiss Streaming Protocol server for Swiss on the GameCube"
+
+[dependencies]
+
+[profile.release]
+lto = true

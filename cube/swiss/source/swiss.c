@@ -67,6 +67,7 @@ file_handle curDir;     //filedescriptor for current directory
 
 // Menu related variables
 int curMenuLocation = ON_FILLIST; //where are we on the screen?
+bool gamesMode = false;         //browsing the games collection instead of folders
 int curMenuSelection = 0;	      //menu selection
 int curSelection = 0;		      //entry selection
 int needsDeviceChange = 0;
@@ -319,7 +320,7 @@ uiDrawObj_t* renderFileBrowser(file_handle** directory, int num_files, uiDrawObj
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
-		uiDrawObj_t *newPanel = DrawContainer();
+		uiDrawObj_t *newPanel = DrawFilePanel();
 		drawFiles(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
@@ -468,6 +469,17 @@ void drawCurrentDeviceCarousel(uiDrawObj_t *containerPanel) {
 	DrawAddChild(containerPanel, devInfoLabel);
 }
 
+static void drawCarouselCard(file_handle** directory, int i, int x1, int y1, int x2, int y2, uiDrawObj_t *containerPanel) {
+	lockFile(directory[i]);
+	populate_meta(directory[i]);
+	uiDrawObj_t *browserObject = DrawFileCarouselEntry(x1, y1, x2, y2,
+							getRelativePath(directory[i]->name, curDir.name),
+							directory[i], i - curSelection);
+	directory[i]->uiObj = browserObject;
+	unlockFile(directory[i]);
+	DrawAddChild(containerPanel, browserObject);
+}
+
 // Draws all the files in the current dir.
 void drawFilesCarousel(file_handle** directory, int num_files, uiDrawObj_t *containerPanel) {
 	int i = 0;
@@ -490,52 +502,113 @@ void drawFilesCarousel(file_handle** directory, int num_files, uiDrawObj_t *cont
 		
 		bool parentLink = (directory[curSelection]->fileType==IS_SPECIAL);
 		int y_base = 105; // top most point
-		int sub_entry_width = 40;
-		int sub_entry_height = 270;
-		int main_entry_width = 320;
-		int main_entry_height = parentLink ? 40 : 280;
-		int left_x_base = ((getVideoMode()->fbWidth / 2) - (main_entry_width / 2));  // left x entry
-		int right_x_base = ((getVideoMode()->fbWidth / 2) + (main_entry_width / 2));  // right x entry
+		int card_width = 320;
+		int card_height = 280;
+		int card_x1 = (getVideoMode()->fbWidth / 2) - (card_width / 2);
+		int card_x2 = (getVideoMode()->fbWidth / 2) + (card_width / 2);
 		
-		uiDrawObj_t *browserObject = NULL;
-		// TODO scale and position based on how far from the middle these are (banner and text too)
-		// Left spineart entries
+		// Cards beside the middle one are turned in 3D (see DrawFileCarouselEntry),
+		// draw the furthest ones first so the nearer cards overlap them
 		for(i = current_view_start; i < curSelection; i++) {
-			lockFile(directory[i]);
-			populate_meta(directory[i]);
-			browserObject = DrawFileCarouselEntry(left_x_base + ((sub_entry_width*(i-curSelection))), y_base + 10,
-									left_x_base + ((sub_entry_width*(i-curSelection))+sub_entry_width), y_base + 10 + sub_entry_height,
-									getRelativePath(directory[i]->name, curDir.name),
-									directory[i], i - curSelection);
-			directory[i]->uiObj = browserObject;
-			unlockFile(directory[i]);
-			DrawAddChild(containerPanel, browserObject);
+			drawCarouselCard(directory, i, card_x1, y_base + 10, card_x2, y_base + 10 + card_height, containerPanel);
+		}
+		for(i = current_view_end - 1; i > curSelection; i--) {
+			drawCarouselCard(directory, i, card_x1, y_base + 10, card_x2, y_base + 10 + card_height, containerPanel);
+		}
+		drawCarouselCard(directory, curSelection, card_x1, y_base, card_x2, y_base + (parentLink ? 40 : card_height), containerPanel);
+	}
+}
+
+#define GAMES_PAGE 5
+
+// Draws the games collection as an animated cover flow
+void drawGamesCoverflow(file_handle** directory, int num_files, uiDrawObj_t *containerPanel) {
+	current_view_start = MAX(0, curSelection - 6);
+	current_view_end = MIN(num_files, curSelection + 7);
+
+	sprintf(txtbuffer, "Games on %s", devices[DEVICE_CUR]->deviceName);
+	float scale = GetTextScaleToFitInWidthWithMax(txtbuffer, 400, 0.75f);
+	DrawAddChild(containerPanel, DrawStyledLabel(30, 94, txtbuffer, scale, ALIGN_LEFT, defaultColor));
+	sprintf(txtbuffer, "%i of %i", curSelection + 1, num_files);
+	DrawAddChild(containerPanel, DrawStyledLabel(getVideoMode()->fbWidth - 30, 94, txtbuffer, 0.625f, ALIGN_RIGHT, accentColor));
+
+	for(int i = current_view_start; i < current_view_end; i++) {
+		lockFile(directory[i]);
+		populate_meta(directory[i]);
+		unlockFile(directory[i]);
+	}
+	DrawAddChild(containerPanel, DrawCoverflow(directory, num_files, curSelection));
+}
+
+// Games collection (every disc image on the device, shown as a cover flow)
+uiDrawObj_t* renderGamesGrid(file_handle** directory, int num_files, uiDrawObj_t* filePanel)
+{
+	if(num_files<=0) {
+		needsRefresh=1;
+		return filePanel;
+	}
+	if(curSelection >= num_files) {
+		curSelection = num_files-1;
+	}
+	uiDrawObj_t *loadingBox = DrawProgressLoading(PROGRESS_BOX_TOPRIGHT);
+	DrawPublish(loadingBox);
+	meta_thread_start(loadingBox);
+	while(1) {
+		u32 retraceCount = VIDEO_GetRetraceCount();
+		DrawUpdateProgressLoading(loadingBox, +1);
+		uiDrawObj_t *newPanel = DrawFilePanel();
+		drawGamesCoverflow(directory, num_files, newPanel);
+		filePanel = DrawRepublish(filePanel, newPanel);
+		DrawUpdateProgressLoading(loadingBox, -1);
+		
+		u32 waitButtons = BUTTON_START|BUTTON_B|BUTTON_A|BUTTON_UP|BUTTON_DOWN|BUTTON_LEFT|BUTTON_RIGHT|BUTTON_L|BUTTON_R;
+		while ((padsStickX() > -16 && padsStickX() < 16) && !(padsButtonsHeld() & waitButtons))
+			{ VIDEO_WaitVSync (); }
+		if((padsButtonsHeld() & BUTTON_LEFT) || padsStickX() <= -16) {
+			curSelection = MAX(0, curSelection - 1);
+		}
+		if((padsButtonsHeld() & BUTTON_RIGHT) || padsStickX() >= 16) {
+			curSelection = MIN(num_files-1, curSelection + 1);
+		}
+		if(padsButtonsHeld() & (BUTTON_UP|BUTTON_L)) {
+			curSelection = MAX(0, curSelection - GAMES_PAGE);
+		}
+		if(padsButtonsHeld() & (BUTTON_DOWN|BUTTON_R)) {
+			curSelection = MIN(num_files-1, curSelection + GAMES_PAGE);
 		}
 		
-		// Main entry
-		lockFile(directory[curSelection]);
-		populate_meta(directory[curSelection]);
-		browserObject = DrawFileCarouselEntry(((getVideoMode()->fbWidth / 2) - (main_entry_width / 2)), y_base,
-								((getVideoMode()->fbWidth / 2) + (main_entry_width / 2)), y_base + main_entry_height,
-								getRelativePath(directory[curSelection]->name, curDir.name),
-								directory[curSelection], 0);
-		directory[curSelection]->uiObj = browserObject;
-		unlockFile(directory[curSelection]);
-		DrawAddChild(containerPanel, browserObject);
-		
-		// Right spineart entries
-		for(i = curSelection+1; i < current_view_end; i++) {
-			lockFile(directory[i]);
-			populate_meta(directory[i]);
-			browserObject = DrawFileCarouselEntry(right_x_base + ((sub_entry_width*(i-curSelection-1))), y_base + 10,
-									right_x_base + ((sub_entry_width*(i-curSelection-1))+sub_entry_width), y_base + 10 + sub_entry_height,
-									getRelativePath(directory[i]->name, curDir.name),
-									directory[i], i - curSelection);
-			directory[i]->uiObj = browserObject;
-			unlockFile(directory[i]);
-			DrawAddChild(containerPanel, browserObject);
+		if(padsButtonsHeld() & BUTTON_A) {
+			lockFile(directory[curSelection]);
+			memcpy(&curFile, directory[curSelection], sizeof(file_handle));
+			if(canLoadFileType(curFile.name, devices[DEVICE_CUR]->extraExtensions)) {
+				meta_thread_stop();
+				load_file();
+			}
+			memcpy(directory[curSelection], &curFile, sizeof(file_handle));
+			unlockFile(directory[curSelection]);
+			break;
+		}
+		if(padsButtonsHeld() & BUTTON_B) {
+			curMenuLocation = ON_OPTIONS;
+			break;
+		}
+		if((padsButtonsHeld() & BUTTON_START) && swissSettings.recentListLevel > 0) {
+			meta_thread_stop();
+			select_recent_entry();
+			break;
+		}
+		if(padsStickX() <= -16 || padsStickX() >= 16) {
+			// Holding the stick scrolls through the cover flow, faster when pushed further
+			VIDEO_WaitForRetrace(retraceCount + lrintf((abs(padsStickX()) > 64 ? 0.08f : 0.16f) * VIDEO_GetRetraceRate()));
+		}
+		else {
+			while (padsButtonsHeld() & waitButtons)
+				{ VIDEO_WaitVSync (); }
 		}
 	}
+	meta_thread_stop();
+	DrawDispose(loadingBox);
+	return filePanel;
 }
 
 // Carousel (one main file in the middle, entries to either side)
@@ -556,7 +629,7 @@ uiDrawObj_t* renderFileCarousel(file_handle** directory, int num_files, uiDrawOb
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
-		uiDrawObj_t *newPanel = DrawContainer();
+		uiDrawObj_t *newPanel = DrawFilePanel();
 		drawFilesCarousel(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
@@ -732,7 +805,7 @@ uiDrawObj_t* renderFileFullwidth(file_handle** directory, int num_files, uiDrawO
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
-		uiDrawObj_t *newPanel = DrawContainer();
+		uiDrawObj_t *newPanel = DrawFilePanel();
 		drawFilesFullwidth(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
@@ -2678,10 +2751,14 @@ void select_device(int type)
 	}
 
 	uiDrawObj_t *deviceSelectBox = NULL;
+	u64 shownAt = 0;
 	while (padsButtonsHeld() & BUTTON_A){ VIDEO_WaitVSync (); }
 	while(1) {
-		// Device selector
+		// Device selector, only zoom in the first time it's shown
 		deviceSelectBox = DrawEmptyBox(20,190, getVideoMode()->fbWidth-20, 410);
+		DrawSetAnimation(deviceSelectBox, UI_ANIM_POP, 320, 300);
+		if(shownAt) deviceSelectBox->born = shownAt;
+		else shownAt = deviceSelectBox->born;
 		uiDrawObj_t *selectLabel = DrawStyledLabel(640/2, 195
 													, type == DEVICE_DEST ? "Destination Device" : "Device Selection"
 													, 1.0f, ALIGN_CENTER, defaultColor);
@@ -2713,6 +2790,7 @@ void select_device(int type)
 
 		textureImage *devImage = &allDevices[curDevice]->deviceTexture;
 		uiDrawObj_t *deviceImage = DrawImage(devImage->textureId, 640/2, 270-(devImage->realHeight/2), devImage->realWidth, devImage->realHeight, 0, 0.0f, 1.0f, 0.0f, 1.0f, 1);
+		DrawSetAnimation(deviceImage, UI_ANIM_SWAY, 640/2, 270);
 		uiDrawObj_t *deviceNameLabel = DrawStyledLabel(640/2, 330, (char*)allDevices[curDevice]->deviceName, 0.85f, ALIGN_CENTER, defaultColor);
 		uiDrawObj_t *deviceDescLabel = DrawStyledLabel(640/2, 350, (char*)allDevices[curDevice]->deviceDescription, 0.65f, ALIGN_CENTER, defaultColor);
 		DrawAddChild(deviceSelectBox, deviceImage);
@@ -2861,7 +2939,22 @@ void menu_loop()
 		if(devices[DEVICE_CUR] != NULL && needsRefresh) {
 			curMenuLocation=ON_OPTIONS;
 			curSelection=0; curMenuSelection=0;
-			scanFiles();
+			if(gamesMode) {
+				uiDrawObj_t *msgBox = DrawPublish(DrawProgressBar(true, 0, "Finding games\205"));
+				scanGames();
+				DrawDispose(msgBox);
+				if(getSortedDirEntryCount() <= 0) {
+					msgBox = DrawPublish(DrawMessageBox(D_INFO, "No GameCube games were found on this device."));
+					sleep(2);
+					DrawDispose(msgBox);
+					gamesMode = false;
+					memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+					scanFiles();
+				}
+			}
+			else {
+				scanFiles();
+			}
 			if(getCurrentDirEntryCount()<=0) { devices[DEVICE_CUR]->deinit(devices[DEVICE_CUR]->initial); needsDeviceChange=1; break;}
 			needsRefresh = 0;
 			curMenuLocation = ON_FILLIST;
@@ -2875,7 +2968,13 @@ void menu_loop()
 			else if(!fnmatch("*/games", curDir.name, FNM_PATHNAME | FNM_CASEFOLD | FNM_LEADING_DIR)) {
 				fileBrowserType = swissSettings.gameBrowserType;
 			}
+			if(gamesMode) {
+				fileBrowserType = -1;
+				filePanel = renderGamesGrid(getSortedDirEntries(), getSortedDirEntryCount(), filePanel);
+			}
 			switch(fileBrowserType) {
+				case -1:
+					break;
 				default:
 					filePanel = renderFileBrowser(getSortedDirEntries(), getSortedDirEntryCount(), filePanel);
 					break;
@@ -2900,8 +2999,37 @@ void menu_loop()
 			else if(btns & BUTTON_RIGHT){curMenuSelection = (curMenuSelection + 1) % MENU_MAX;	}
 
 			if(btns & BUTTON_A) {
+				// Let the selected cube jump before switching screens
+				DrawHomeActivate(curMenuSelection);
+				while(DrawHomeActivating()) {
+					VIDEO_WaitVSync();
+				}
 				//handle menu event
 				switch(curMenuSelection) {
+					case MENU_GAMES:
+						gamesMode = true;
+						if(devices[DEVICE_CUR] == NULL) {
+							needsDeviceChange = 1;
+						}
+						else {
+							memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+							needsRefresh = 1;
+						}
+						break;
+					case MENU_FILES:
+						if(devices[DEVICE_CUR] == NULL) {
+							gamesMode = false;
+							needsDeviceChange = 1;
+						}
+						else if(gamesMode) {
+							gamesMode = false;
+							memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));
+							needsRefresh = 1;
+						}
+						else {
+							curMenuLocation = ON_FILLIST;
+						}
+						break;
 					case MENU_DEVICE:
 						needsDeviceChange = 1;  //Change from SD->DVD or vice versa
 						break;
