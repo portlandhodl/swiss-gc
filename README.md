@@ -19,10 +19,6 @@ This fork replaces the flat Swiss interface with a 3D one inspired by the GameCu
 
 *A recording of Swiss: the home menu, the Games cover flow, the file browser and the settings pages.*
 
-![Home menu](docs/screenshots/home-menu.png)
-
-*The home menu scene, rendered in Dolphin by a small test program that uses the same `gui/scene3d.c` drawing code and menu icons as Swiss. Swiss itself does not currently start in Dolphin, so this is not a capture of the full Swiss screen; text, panels and hints are not shown.*
-
 - **Home menu**: the main sections are glass cubes on a rotating ring above a glossy, reflective floor. The selected cube comes forward and glows; pressing A makes it crouch, jump with a spin and land before the screen fades over to the chosen section. Sections: Games, Files, Devices, Settings, System Info, Refresh and Exit.
 - **Games**: every disc image (`.iso`, `.gcm`, `.tgc`, `.gcz`, `.rvz`) found up to three folders deep on the current device, shown as an iTunes style cover flow of cards with the game's banner, title, publisher, size and region. The cards glide to the new selection and are reflected on the floor.
 - **Files**: the regular Swiss file browser. The list recedes into the scene when the home menu opens, the carousel browser turns its side cards in 3D.
