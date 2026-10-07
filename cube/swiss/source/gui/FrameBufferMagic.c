@@ -1965,6 +1965,138 @@ static GXTexObj *homeIcon(int item, float *aspect) {
 	}
 }
 
+// Controller button glyphs for the hint bars, drawn in the GameCube pad's colours and shapes.
+// Each glyph character is one button: A B X Y Z L R, S = Start, D = D-Pad.
+typedef struct {
+	const char *glyphs;
+	const char *label;
+} ButtonHint;
+
+typedef struct {
+	float w, h, r;
+	GXColor fill;
+	GXColor text;
+	const char *letter;
+	float letterScale;
+} ButtonGlyph;
+
+static ButtonGlyph buttonGlyph(char button) {
+	GXColor white = (GXColor) {255,255,255,255};
+	GXColor grey = (GXColor) {196,196,204,255};
+	GXColor dark = (GXColor) {56,56,68,255};
+	switch(button) {
+		case 'A': return (ButtonGlyph) {20, 20, 10, (GXColor) {24,176,112,255}, white, "A", 0.6f};
+		case 'B': return (ButtonGlyph) {16, 16,  8, (GXColor) {222,40,48,255}, white, "B", 0.5f};
+		case 'X': return (ButtonGlyph) {14, 20,  7, grey, dark, "X", 0.5f};
+		case 'Y': return (ButtonGlyph) {20, 14,  7, grey, dark, "Y", 0.5f};
+		case 'Z': return (ButtonGlyph) {26, 13, 6.5f, (GXColor) {104,80,208,255}, white, "Z", 0.45f};
+		case 'L': return (ButtonGlyph) {22, 15,  5, grey, dark, "L", 0.5f};
+		case 'R': return (ButtonGlyph) {22, 15,  5, grey, dark, "R", 0.5f};
+		case 'S': return (ButtonGlyph) {36, 13, 6.5f, grey, dark, "START", 0.36f};
+		default:  return (ButtonGlyph) {20, 20,  0, grey, dark, NULL, 0.0f};	// D-Pad
+	}
+}
+
+// Filled rounded rectangle centred on (cx,cy) as a triangle fan, shaded top -> bottom
+static void _drawRoundedFill(float cx, float cy, float w, float h, float r, GXColor top, GXColor bottom) {
+	const int seg = 6;
+	float x0 = cx - w/2 + r, x1 = cx + w/2 - r;
+	float y0 = cy - h/2 + r, y1 = cy + h/2 - r;
+	float corners[4][3] = {
+		{x1, y1, 0.0f}, {x0, y1, M_PI/2}, {x0, y0, M_PI}, {x1, y0, M_PI*1.5f}
+	};
+	GX_Begin(GX_TRIANGLEFAN, GX_VTXFMT0, 2 + 4*(seg+1));
+	GXColor mid = mixColor(top, bottom, 0.5f, (top.a + bottom.a) / 2);
+	GX_Position3f32(cx, cy, 0.0f); GX_Color4u8(mid.r, mid.g, mid.b, mid.a); GX_TexCoord2f32(0.0f, 0.0f);
+	for(int c = 0; c < 4; c++) {
+		for(int i = 0; i <= seg; i++) {
+			float a = corners[c][2] + (M_PI/2) * i / seg;
+			float px = corners[c][0] + cosf(a) * r;
+			float py = corners[c][1] + sinf(a) * r;
+			float t = (py - (cy - h/2)) / h;
+			GXColor col = mixColor(top, bottom, t, top.a + (bottom.a - top.a) * t);
+			GX_Position3f32(px, py, 0.0f); GX_Color4u8(col.r, col.g, col.b, col.a); GX_TexCoord2f32(0.0f, 0.0f);
+		}
+	}
+	// Close the fan back on the first rim vertex
+	float t = (y1 - (cy - h/2)) / h;
+	GXColor col = mixColor(top, bottom, t, top.a + (bottom.a - top.a) * t);
+	GX_Position3f32(x1 + r, y1, 0.0f); GX_Color4u8(col.r, col.g, col.b, col.a); GX_TexCoord2f32(0.0f, 0.0f);
+	GX_End();
+}
+
+static void _drawGlyphShape(float cx, float cy, float w, float h, float r, GXColor fill, bool dpad, float alpha) {
+	GXColor white = (GXColor) {255,255,255,255};
+	GXColor black = (GXColor) {0,0,0,255};
+	GXColor rim = (GXColor) {16,12,36,(u8)(200*alpha)};
+	GXColor top = mixColor(fill, white, 0.3f, 255*alpha);
+	GXColor bottom = mixColor(fill, black, 0.25f, 255*alpha);
+	if(dpad) {
+		float arm = w * 0.36f;
+		_drawRoundedFill(cx, cy, w + 2, arm + 2, 2.5f, rim, rim);
+		_drawRoundedFill(cx, cy, arm + 2, h + 2, 2.5f, rim, rim);
+		_drawRoundedFill(cx, cy, w, arm, 1.5f, top, bottom);
+		_drawRoundedFill(cx, cy, arm, h, 1.5f, top, bottom);
+		// Arrow nubs on each arm
+		GXColor nub = (GXColor) {56,56,68,(u8)(200*alpha)};
+		float d = w/2 - arm*0.45f;
+		_drawRoundedFill(cx - d, cy, 2.5f, 2.5f, 1.25f, nub, nub);
+		_drawRoundedFill(cx + d, cy, 2.5f, 2.5f, 1.25f, nub, nub);
+		_drawRoundedFill(cx, cy - d, 2.5f, 2.5f, 1.25f, nub, nub);
+		_drawRoundedFill(cx, cy + d, 2.5f, 2.5f, 1.25f, nub, nub);
+		return;
+	}
+	_drawRoundedFill(cx, cy + 1, w + 2, h + 2, r + 1, rim, rim);
+	_drawRoundedFill(cx, cy, w, h, r, top, bottom);
+	// Specular highlight across the upper half
+	GXColor shine = (GXColor) {255,255,255,(u8)(70*alpha)};
+	GXColor clear = (GXColor) {255,255,255,0};
+	float hr = MIN(r, h*0.25f);
+	_drawRoundedFill(cx, cy - h*0.22f, w*0.7f, h*0.4f, hr, shine, clear);
+}
+
+static float buttonHintWidth(const ButtonHint *hint, float scale) {
+	float w = 0;
+	for(const char *g = hint->glyphs; *g; g++) {
+		w += buttonGlyph(*g).w * scale + (g[1] ? 3 : 0);
+	}
+	return w + 6 * scale + GetTextSizeInPixels(hint->label) * 0.625f * scale;
+}
+
+// Row of [glyph] label pairs centred on (cx,cy), shrunk to fit maxWidth
+static void drawButtonHints(int cx, int cy, int maxWidth, const ButtonHint *hints, int count, GXColor labelColor, float alpha) {
+	const float spacing = 26;
+	float total = 0;
+	for(int i = 0; i < count; i++) {
+		total += buttonHintWidth(&hints[i], 1.0f) + (i ? spacing : 0);
+	}
+	float scale = total > maxWidth ? maxWidth / total : 1.0f;
+	float x = cx - total * scale / 2;
+	for(int i = 0; i < count; i++) {
+		for(const char *g = hints[i].glyphs; *g; g++) {
+			ButtonGlyph bg = buttonGlyph(*g);
+			float w = bg.w * scale, h = bg.h * scale;
+			drawInit();
+			GX_SetNumTevStages(1);
+			GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+			GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+			GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+			_drawGlyphShape(x + w/2, cy, w, h, bg.r * scale, bg.fill, bg.letter == NULL, alpha);
+			drawInit();
+			if(bg.letter) {
+				GXColor text = bg.text;
+				text.a = (u8)(255*alpha);
+				drawString(x + w/2, cy, bg.letter, bg.letterScale * scale, ALIGN_CENTER, text);
+			}
+			x += w + (g[1] ? 3 : 0);
+		}
+		x += 6 * scale;
+		drawString(x, cy, hints[i].label, 0.625f * scale, ALIGN_LEFT, labelColor);
+		x += GetTextSizeInPixels(hints[i].label) * 0.625f * scale + spacing * scale;
+	}
+	drawInit();
+}
+
 // IPL style ring of cubes, one per menu entry
 static void drawHomeMenu(int selection) {
 	float t = Scene3D_Time();
@@ -2057,9 +2189,13 @@ static void drawHomeMenu(int selection) {
 		sprintf(fbTextBuffer, "Current device: %s", devices[DEVICE_CUR]->deviceName);
 		drawString(320, 108, fbTextBuffer, 0.625f, ALIGN_CENTER, sub);
 	}
-	drawString(320, 452, swissSettings.recentListLevel > 0
-		? "\213\233 Select     (A) Open     (B) Back     (Start) Recent"
-		: "\213\233 Select     (A) Open     (B) Back", 0.625f, ALIGN_CENTER, sub);
+	ButtonHint hints[4] = {
+		{"D", "Select"},
+		{"A", "Open"},
+		{"B", "Back"},
+		{"S", "Recent"},
+	};
+	drawButtonHints(320, 452, 540, hints, swissSettings.recentListLevel > 0 ? 4 : 3, sub, hb);
 }
 
 // Hint bar shown along the bottom while browsing files
@@ -2068,17 +2204,25 @@ static void drawBrowserDock(float alpha) {
 	GXColor border = THEME_BORDER;
 	border.a = (u8)(border.a*alpha);
 	_DrawSimpleBox(40, 436, 560, 32, 0, (GXColor) {40,32,112,(u8)(150*alpha)}, border);
+	ButtonHint hints[5];
+	int count = 0;
 	if(gamesMode) {
-		sprintf(fbTextBuffer, "(A) Play   (B) Home Menu   (L/R) Jump%s",
-			swissSettings.recentListLevel > 0 ? "   (Start) Recent" : "");
+		hints[count++] = (ButtonHint) {"A", "Play"};
+		hints[count++] = (ButtonHint) {"B", "Home Menu"};
+		hints[count++] = (ButtonHint) {"LR", "Jump"};
 	}
 	else {
-		sprintf(fbTextBuffer, "(A) Open   (B) Home Menu   (X) Parent Folder%s%s",
-			swissSettings.enableFileManagement ? "   (Z) Manage" : "",
-			swissSettings.recentListLevel > 0 ? "   (Start) Recent" : "");
+		hints[count++] = (ButtonHint) {"A", "Open"};
+		hints[count++] = (ButtonHint) {"B", "Home Menu"};
+		hints[count++] = (ButtonHint) {"X", "Parent Folder"};
+		if(swissSettings.enableFileManagement) {
+			hints[count++] = (ButtonHint) {"Z", "Manage"};
+		}
 	}
-	float hintScale = GetTextScaleToFitInWidthWithMax(fbTextBuffer, 540, 0.625f);
-	drawString(320, 452, fbTextBuffer, hintScale, ALIGN_CENTER, sub);
+	if(swissSettings.recentListLevel > 0) {
+		hints[count++] = (ButtonHint) {"S", "Recent"};
+	}
+	drawButtonHints(320, 452, 540, hints, count, sub, alpha);
 }
 
 // Internal
