@@ -28,6 +28,7 @@
 #include "btns.h"
 #include "dolparameters.h"
 #include "cheats.h"
+#include "scene3d.h"
 
 #define GUI_MSGBOX_ALPHA 225
 
@@ -111,11 +112,12 @@ enum VideoEventType
 	EV_CONTAINER,
 	EV_MENUBUTTONS,
 	EV_TOOLTIP,
-	EV_TITLEBAR
+	EV_TITLEBAR,
+	EV_SCENE3D
 };
 
 char * typeStrings[] = {"TexObj", "MsgBox", "Image", "Progress", "SelectableButton", "EmptyBox", "TransparentBox",
-						"FileBrowserButton", "VertScrollbar", "StyledLabel", "Container", "MenuButtons", "Tooltip", "TitleBar"};
+						"FileBrowserButton", "VertScrollbar", "StyledLabel", "Container", "MenuButtons", "Tooltip", "TitleBar", "Scene3D"};
 
 typedef struct drawTexObjEvent {
 	GXTexObj *texObj;
@@ -194,7 +196,7 @@ typedef struct drawFileBrowserButtonEvent {
 	int alpha;
 	bool isAutoLoadEntry;
 	bool isCarousel;	// Draw this as a full "card" style
-	int distFromMiddle;	// 0 = full, -1 spine only but large then gradually getting smaller as dist increases from 0
+	int distFromMiddle;	// 0 = middle card, otherwise how many cards to the left (-) or right (+)
 } drawFileBrowserButtonEvent_t;
 
 typedef struct drawMenuButtonsEvent {
@@ -227,6 +229,11 @@ typedef struct uiDrawObjQueue {
 
 static uiDrawObjQueue_t *videoEventQueue = NULL;
 static uiDrawObj_t *buttonPanel = NULL;
+
+// Home menu animation state, owned by the video thread
+static bool customBackdrop = false;
+static float homeBlend = 0.0f;	// 0 = file browser, 1 = home menu
+static float ringPos = 0.0f;	// smoothed home menu selection
 
 // Add root level uiDrawObj_t
 static uiDrawObj_t* addVideoEvent(uiDrawObj_t *event) {
@@ -389,7 +396,6 @@ static void init_textures()
 
 static void drawInit()
 {
-	Mtx44 GXprojection2D;
 	Mtx GXmodelView2D;
 
 	// Reset various parameters from gfx plugin
@@ -399,11 +405,12 @@ static void drawInit()
 
 	guMtxIdentity(GXmodelView2D);
 	GX_LoadTexMtxImm(GXmodelView2D,GX_TEXMTX0,GX_MTX2x4);
+	UI_ApplyTransform(GXmodelView2D, GXmodelView2D);
 	GX_LoadPosMtxImm(GXmodelView2D,GX_PNMTX0);
-	guOrtho(GXprojection2D, 0, 480, 0, 640, 0, 1);
-	GX_LoadProjectionMtx(GXprojection2D, GX_ORTHOGRAPHIC);
+	UI_LoadProjection();
 
 	GX_SetZMode(GX_DISABLE,GX_ALWAYS,GX_FALSE);
+	GX_SetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
 
 	GX_ClearVtxDesc();
 	GX_SetVtxDesc(GX_VA_PNMTXIDX, GX_PNMTX0);
@@ -735,11 +742,11 @@ static void _DrawProgressBar(uiDrawObj_t *evt) {
 	int y1 = ((480/2) - (PROGRESS_BOX_HEIGHT/2));
 	int y2 = ((480/2) + (PROGRESS_BOX_HEIGHT/2));
 
-  	GXColor fillColor = (GXColor) {0,0,0,GUI_MSGBOX_ALPHA}; //black
-  	GXColor noColor = (GXColor) {0,0,0,0}; //blank
-	GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //silver
-	GXColor progressBarColor = (GXColor) {255,128,0,GUI_MSGBOX_ALPHA}; //orange
-	GXColor progressBarIndColor = (GXColor) {0xb3,0xd9,0xff,GUI_MSGBOX_ALPHA}; //orange
+	GXColor fillColor = THEME_PANEL_DARK;
+	GXColor noColor = (GXColor) {0,0,0,0}; //blank
+	GXColor borderColor = THEME_BORDER;
+	GXColor progressBarColor = THEME_PROGRESS;
+	GXColor progressBarIndColor = THEME_PROGRESS_IND;
 	
 	if(data->miniMode) {	
 		int x = 30, y = 420;
@@ -824,6 +831,7 @@ uiDrawObj_t* DrawProgressBar(bool indeterminate, int percent, const char *messag
 	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
 	event->type = EV_PROGRESS;
 	event->data = eventData;
+	DrawSetAnimation(event, UI_ANIM_POP, 320, 240);
 	if(message && strlen(message) > 0) {
 		sprintf(txtbuffer, "%s", message);
 		// Add child component(s) for label(s)
@@ -857,8 +865,8 @@ static void _DrawMessageBox(uiDrawObj_t *evt) {
 	int y1 = ((480/2) - (PROGRESS_BOX_HEIGHT/2));
 	int y2 = ((480/2) + (PROGRESS_BOX_HEIGHT/2));
 	
-  	GXColor fillColor = (GXColor) {0,0,0,GUI_MSGBOX_ALPHA}; //black
-	GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //silver
+	GXColor fillColor = THEME_PANEL_DARK;
+	GXColor borderColor = THEME_BORDER;
 	
 	_DrawSimpleBox( x1, y1, x2-x1, y2-y1, 0, fillColor, borderColor); 
 }	
@@ -871,6 +879,7 @@ uiDrawObj_t* DrawMessageBox(int type, const char *msg)
 	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
 	event->type = EV_MSGBOX;
 	event->data = eventData;
+	DrawSetAnimation(event, UI_ANIM_POP, 320, 240);
 	
 	// Add child component(s) for label(s)
 	sprintf(txtbuffer, "%s", msg);
@@ -893,9 +902,9 @@ static void _DrawSelectableButton(uiDrawObj_t *evt) {
 	drawSelectableButtonEvent_t *data = (drawSelectableButtonEvent_t*)evt->data;
 	int x1 = data->x1;
 	int x2 = data->x2;
-	GXColor selectColor = (GXColor) {96,107,164,GUI_MSGBOX_ALPHA}; //bluish
+	GXColor selectColor = THEME_SELECT;
 	GXColor noColor = (GXColor) {0,0,0,0}; //black
-	GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //silver
+	GXColor borderColor = THEME_BORDER_DIM;
 	
 	int borderSize = 4;
 	//determine length of the text ourselves if x2 == -1
@@ -948,14 +957,15 @@ static void _DrawTooltip(uiDrawObj_t *evt) {
 		int alpha = 255;
 		int borderSize = 4;
 		GXColor borderColorTT = (GXColor) {255,255,255,alpha};
-		GXColor backColorTT = (GXColor) {122,122,122,alpha}; //grey
+		GXColor backColorTT = THEME_PANEL_DARK;
+		backColorTT.a = alpha;
 		int numLines = 1;
 		char *strPtr = data->tooltip;
 		for (numLines=1; strPtr[numLines]; strPtr[numLines]=='\n' ? numLines++ : *strPtr++);
 		int height = numLines*26;
 		int tooltipY1 = (getVideoMode()->efbHeight / 2) - (height/2);
 		int tooltipX1 = 25, tooltipX2 = getVideoMode()->fbWidth-25, tooltipY2 = tooltipY1+height;
-		_DrawSimpleBox( tooltipX1, tooltipY1-6, tooltipX2-tooltipX1, (tooltipY2-tooltipY1)+6, 0, backColorTT, borderColorTT);
+		_DrawSimpleBox( tooltipX1, tooltipY1-6, tooltipX2-tooltipX1, (tooltipY2-tooltipY1)+6, 0, backColorTT, THEME_BORDER);
 		
 		// Write each line
 		strPtr = data->tooltip;
@@ -1119,11 +1129,10 @@ static void _DrawFileBrowserButton(uiDrawObj_t *evt) {
 	drawFileBrowserButtonEvent_t *data = (drawFileBrowserButtonEvent_t*)evt->data;
 	int borderSize = 4;	
 	if(data->isCarousel) {	
-		// Not selected
-		GXColor noColor 	= (GXColor) {0,0,0,128};
-		GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //Silver
-		// Large middle entry currently being displayed, verbose info
-		if(data->distFromMiddle == 0) {
+		// Every entry is a full card, the ones beside the middle are turned away in 3D
+		GXColor noColor 	= data->distFromMiddle == 0 ? THEME_PANEL : THEME_PANEL_DARK;
+		GXColor borderColor = data->distFromMiddle == 0 ? THEME_BORDER : THEME_BORDER_DIM;
+		{
 
 			_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, noColor, borderColor);
 			
@@ -1210,57 +1219,13 @@ static void _DrawFileBrowserButton(uiDrawObj_t *evt) {
 				drawString(data->x2-(borderSize+8), data->y2-(borderSize+19), fbTextBuffer, 0.45f, ALIGN_RIGHT, defaultColor);
 			}
 		}
-		else {
-			// Vertical
-			_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, noColor, borderColor);
-			int bnr_width = 72;
-			int bnr_height = 24;
-			int x_start = (data->x2-((data->x2-data->x1)/2)) - (bnr_height/2);
-			// Draw banner if there is one
-			file_handle *file = data->file;
-			if(file->meta && (file->meta->banner || file->meta->fileTypeTexObj)) {
-				GXTexObj *texObj = (file->meta->banner ? &file->meta->bannerTexObj : file->meta->fileTypeTexObj);
-				if(file->meta->banner) {
-					GX_SetTevOrder(GX_TEVSTAGE1, GX_TEXCOORD0, GX_TEXMAP1, GX_COLOR0A0);
-					GX_SetTevColorIn(GX_TEVSTAGE1, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_CPREV);
-					GX_SetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_APREV, GX_CA_TEXA, GX_CA_ZERO);
-					GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-				}
-				GX_InvalidateTexAll();
-				GXTlutObj *tlutObj = GX_GetTexObjUserData(texObj);
-				if(tlutObj) GX_LoadTlut(tlutObj, GX_GetTexObjTlut(texObj));
-				GX_LoadTexObj(texObj, GX_TEXMAP0);
-				GX_LoadTexObj(&bannerMaskTexObj, GX_TEXMAP1);
-				GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
-					GX_Position3f32((float)x_start,(float) data->y2-borderSize, 0.0f ); // bottom left
-					GX_Color4u8(255, 255, 255, data->alpha);
-					GX_TexCoord2f32(0.0f,0.0f);
-					GX_Position3f32((float)x_start,(float) data->y2-bnr_width-borderSize,0.0f );	// top left
-					GX_Color4u8(255, 255, 255, data->alpha);
-					GX_TexCoord2f32(1.0f,0.0f);
-					GX_Position3f32((float)x_start+bnr_height,(float) data->y2-bnr_width-borderSize,0.0f );	// top right
-					GX_Color4u8(255, 255, 255, data->alpha);
-					GX_TexCoord2f32(1.0f,1.0f);
-					GX_Position3f32((float)x_start+bnr_height,(float) data->y2 - borderSize,0.0f );	// bottom right
-					GX_Color4u8(255, 255, 255, data->alpha);
-					GX_TexCoord2f32(0.0f,1.0f);
-				GX_End();
-				
-				if(data->isAutoLoadEntry) {
-					drawInit();
-					_DrawImageNow(TEX_STAR, x_start, data->y2-bnr_width-borderSize, 12, 12, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-				}
-			}
-			// fullGameName displays some titles with incorrect encoding, use displayName instead
-			drawStringEllipsis(data->x1+(data->x2-data->x1)/2, data->y2-bnr_width-5-borderSize, data->displayName, 0.5f, ALIGN_LEFT, defaultColor, true, (data->y2-bnr_width-5-borderSize) - (data->y1 + (borderSize*2)));
-		}
 	}
 	else {
 		
 		// Not selected
 		GXColor noColor 	= (GXColor) {0,0,0,0};
-		GXColor selectColor = (GXColor) {46,57,104,GUI_MSGBOX_ALPHA}; 	//bluish
-		GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //Silver
+		GXColor selectColor = THEME_SELECT;
+		GXColor borderColor = data->mode == B_SELECTED ? THEME_BORDER : THEME_BORDER_DIM;
 
 		_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 
 					0, data->mode == B_SELECTED ? selectColor : noColor, borderColor);
@@ -1424,6 +1389,14 @@ uiDrawObj_t* DrawFileCarouselEntry(int x1, int y1, int x2, int y2, const char *m
 	drawFileBrowserButtonEvent_t *data = (drawFileBrowserButtonEvent_t*)event->data;
 	data->isCarousel = true;
 	data->distFromMiddle = distFromMiddle;
+	if(distFromMiddle != 0) {
+		// Cover-flow: turn the card towards the middle and push it back
+		int side = distFromMiddle < 0 ? -1 : 1;
+		int dist = abs(distFromMiddle);
+		float cx = (x1 + x2) / 2.0f, cy = (y1 + y2) / 2.0f;
+		UI_MakeTransform(event->xform, cx, cy, side * (240.0f + (dist-1) * 44.0f), 0.0f, -150.0f - (dist-1) * 40.0f, side * 0.95f, 0.0f, 0.92f);
+		event->hasXform = true;
+	}
 	//print_debug("message %s dist = %i x: (%i -> %i) y: (%i -> %i)\n", message, distFromMiddle, x1, x2, y1, y2);
 	return event;
 }
@@ -1432,7 +1405,7 @@ uiDrawObj_t* DrawFileCarouselEntry(int x1, int y1, int x2, int y2, const char *m
 static void _DrawEmptyBox(uiDrawObj_t *evt) {
 	drawBoxEvent_t *data = (drawBoxEvent_t*)evt->data;
 	
-	GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //Silver
+	GXColor borderColor = THEME_BORDER;
 	
 	_DrawSimpleBox(data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, data->backfill, borderColor);
 }
@@ -1449,7 +1422,7 @@ uiDrawObj_t* DrawEmptyBox(int x1, int y1, int x2, int y2)
 	eventData->y1 = y1;
 	eventData->x2 = x2;
 	eventData->y2 = y2;
-	eventData->backfill = (GXColor) {0,0,0,GUI_MSGBOX_ALPHA}; //Black
+	eventData->backfill = THEME_PANEL_DARK;
 	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
 	event->type = EV_EMPTYBOX;
 	event->data = eventData;
@@ -1479,7 +1452,7 @@ uiDrawObj_t* DrawEmptyColouredBox(int x1, int y1, int x2, int y2, GXColor colour
 static void _DrawTransparentBox(uiDrawObj_t *evt) {
 	drawBoxEvent_t *data = (drawBoxEvent_t*)evt->data;
 	
-	GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //Silver
+	GXColor borderColor = THEME_BORDER_DIM;
 	
 	_DrawSimpleBox( data->x1, data->y1, data->x2-data->x1, data->y2-data->y1, 0, data->backfill, borderColor);
 }
@@ -1504,19 +1477,35 @@ uiDrawObj_t* DrawTransparentBox(int x1, int y1, int x2, int y2)
 }
 
 // Internal
+static void _DrawScene3D(uiDrawObj_t *evt) {
+	if(customBackdrop) {
+		_DrawImageNow(TEX_BACKDROP, 0, 0, 640, 480, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
+		return;
+	}
+	Scene3D_DrawBackground();
+}
+
+// External
+uiDrawObj_t* DrawScene3D()
+{
+	uiDrawObj_t *event = calloc(1, sizeof(uiDrawObj_t));
+	event->type = EV_SCENE3D;
+	return event;
+}
+
+// Internal
 static void _DrawTitleBar(uiDrawObj_t *evt) {
-	
-	GXColor fillColor = (GXColor) {0,0,0,128}; //black
-	GXColor noColor = (GXColor) {0,0,0,0}; //blank
-	
-	_DrawSimpleBox(19, 17, 602, 62, 0, fillColor, noColor);
-	
-	_DrawImageNow(TEX_SWISS, 36, 32, 96, 32, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-	drawString(142, 39, "for GameCube", 0.55f, ALIGN_LEFT, defaultColor);
-	drawString(142, 56, "version 0.6", 0.55f, ALIGN_LEFT, defaultColor);
+	Scene3D_DrawGradientRect(0, 0, 640, 86, (GXColor) {8,6,30,215}, (GXColor) {8,6,30,40});
+	Scene3D_DrawGradientRect(24, 82, 592, 1, THEME_BORDER_DIM, THEME_BORDER_DIM);
+	Scene3D_DrawLogoCube(52, 47, 30, 1.0f);
+
+	drawInit();
+	_DrawImageNow(TEX_SWISS, 80, 32, 96, 32, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
+	drawString(186, 39, "for GameCube", 0.55f, ALIGN_LEFT, defaultColor);
+	drawString(186, 56, "version 0.6", 0.55f, ALIGN_LEFT, deSelectedColor);
 	
 	sprintf(fbTextBuffer, "commit: %s \267 revision: %s", GIT_COMMIT, GIT_REVISION);
-	drawString(getVideoMode()->fbWidth-36, 56, fbTextBuffer, 0.55f, ALIGN_RIGHT, defaultColor);
+	drawString(getVideoMode()->fbWidth-36, 56, fbTextBuffer, 0.55f, ALIGN_RIGHT, deSelectedColor);
 	
 	s8 cputemp = SYS_GetCoreTemperature();
 	if(cputemp >= 0) {
@@ -1538,31 +1527,131 @@ uiDrawObj_t* DrawTitleBar()
 	return event;
 }
 
-// Internal
-static void _DrawMenuButtons(uiDrawObj_t *evt) {
-	
-	drawMenuButtonsEvent_t *data = (drawMenuButtonsEvent_t*)evt->data;
-	
-	GXColor fillColor = (GXColor) {255,255,255,51}; //white
-	GXColor noColor = (GXColor) {0,0,0,0}; //blank
-	
-	_DrawSimpleBox(19, 426, 602, 602, 0, fillColor, noColor);
-	
-	// Highlight selected
-	int i;
-	for(i=0;i<5;i++)
-	{
-		if(data->selection==i) 
-			_DrawImageNow(TEX_BTNHILIGHT, 48+(i*119), 428, BTNHILIGHT_WIDTH, BTNHILIGHT_HEIGHT, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
+static const struct {
+	const char *label;
+	const char *desc;
+	GXColor color;
+} homeItems[MENU_MAX] = {
+	[MENU_DEVICE]   = {"Devices",     "Choose where to browse games and files", {120,  92, 255, 0}},
+	[MENU_SETTINGS] = {"Settings",    "Configure Swiss and per-game options",   { 70, 130, 255, 0}},
+	[MENU_INFO]     = {"System Info", "Console, device and version details",    { 40, 190, 210, 0}},
+	[MENU_REFRESH]  = {"Refresh",     "Rescan the current device",              { 90, 200, 120, 0}},
+	[MENU_EXIT]     = {"Exit",        "Leave Swiss and reboot the console",     {240, 100,  96, 0}},
+};
+
+static GXTexObj *homeIcon(int item, float *aspect) {
+	switch(item) {
+		case MENU_DEVICE:   *aspect = (float)BTNDEVICE_WIDTH / BTNDEVICE_HEIGHT;     return &btndeviceTexObj;
+		case MENU_SETTINGS: *aspect = (float)BTNSETTINGS_WIDTH / BTNSETTINGS_HEIGHT; return &btnsettingsTexObj;
+		case MENU_INFO:     *aspect = (float)BTNINFO_WIDTH / BTNINFO_HEIGHT;         return &btninfoTexObj;
+		case MENU_REFRESH:  *aspect = (float)BTNREFRESH_WIDTH / BTNREFRESH_HEIGHT;   return &btnrefreshTexObj;
+		default:            *aspect = (float)BTNEXIT_WIDTH / BTNEXIT_HEIGHT;         return &btnexitTexObj;
+	}
+}
+
+// IPL style ring of cubes, one per menu entry
+static void drawHomeMenu(int selection) {
+	float t = Scene3D_Time();
+	float hb = homeBlend;
+	float lift = (1.0f-hb) * 80.0f;
+	cube3d_t cubes[MENU_MAX];
+	int order[MENU_MAX];
+
+	for(int i = 0; i < MENU_MAX; i++) {
+		float rel = i - ringPos;
+		while(rel >  MENU_MAX/2.0f) rel -= MENU_MAX;
+		while(rel < -MENU_MAX/2.0f) rel += MENU_MAX;
+		float theta = rel * (2.0f*M_PI/MENU_MAX);
+		float front = (cosf(theta)+1.0f) * 0.5f;
+		float emph = powf(front, 6.0f);
+		cube3d_t *c = &cubes[i];
+		c->x = 320.0f + sinf(theta)*205.0f;
+		c->y = 236.0f - (1.0f-cosf(theta))*22.0f + lift;
+		c->z = (cosf(theta)-1.0f)*190.0f - (1.0f-hb)*300.0f;
+		c->size = 74.0f + 30.0f*emph;
+		if(i == selection) {
+			c->size *= 1.0f + 0.03f*sinf(t*4.0f);
+		}
+		c->rx = 0.42f;
+		c->ry = -theta*0.7f + emph*sinf(t*1.4f)*0.2f;
+		c->rz = 0.0f;
+		c->color = homeItems[i].color;
+		c->color.a = (u8)((110.0f + 120.0f*front) * hb);
+		c->edges = 0.5f + 0.5f*emph;
+		order[i] = i;
+	}
+	for(int i = 1; i < MENU_MAX; i++) {
+		for(int j = i; j > 0 && cubes[order[j]].z < cubes[order[j-1]].z; j--) {
+			int tmp = order[j]; order[j] = order[j-1]; order[j-1] = tmp;
+		}
 	}
 
-	// Draw the buttons	
-	drawInit();
-	_DrawImageNow(TEX_BTNDEVICE, 48+(0*119)+BTNDEVICE_X, 428+BTNDEVICE_Y, BTNDEVICE_WIDTH, BTNDEVICE_HEIGHT, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-	_DrawImageNow(TEX_BTNSETTINGS, 48+(1*119)+BTNSETTINGS_X, 428+BTNSETTINGS_Y, BTNSETTINGS_WIDTH, BTNSETTINGS_HEIGHT, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-	_DrawImageNow(TEX_BTNINFO, 48+(2*119)+BTNINFO_X, 428+BTNINFO_Y, BTNINFO_WIDTH, BTNINFO_HEIGHT, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-	_DrawImageNow(TEX_BTNREFRESH, 48+(3*119)+BTNREFRESH_X, 428+BTNREFRESH_Y, BTNREFRESH_WIDTH, BTNREFRESH_HEIGHT, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
-	_DrawImageNow(TEX_BTNEXIT, 48+(4*119)+BTNEXIT_X, 428+BTNEXIT_Y, BTNEXIT_WIDTH, BTNEXIT_HEIGHT, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0);
+	int sel = selection >= 0 ? selection : 0;
+	float pulse = 0.75f + 0.25f*sinf(t*3.0f);
+	GXColor glow = homeItems[sel].color;
+	glow.r = (u8)(glow.r * pulse * hb);
+	glow.g = (u8)(glow.g * pulse * hb);
+	glow.b = (u8)(glow.b * pulse * hb);
+	glow.a = 255;
+	Scene3D_DrawGlow(&btnhilightTexObj, 320.0f, 236.0f + lift, -140.0f, 340.0f, 230.0f, glow);
+
+	for(int i = 0; i < MENU_MAX; i++) {
+		int item = order[i];
+		float aspect;
+		GXTexObj *icon = homeIcon(item, &aspect);
+		Scene3D_DrawCubes(&cubes[item], 1);
+		Scene3D_DrawCubeIcon(&cubes[item], icon, aspect, hb);
+	}
+
+	GXColor title = (GXColor) {255,255,255,(u8)(255*hb)};
+	GXColor sub = (GXColor) {190,180,255,(u8)(230*hb)};
+	Scene3D_DrawGradientRect(0, 420, 640, 60, (GXColor) {5,4,18,0}, (GXColor) {5,4,18,(u8)(210*hb)});
+	drawString(320, 356 + lift, homeItems[sel].label, 1.1f, ALIGN_CENTER, title);
+	drawString(320, 384 + lift, homeItems[sel].desc, 0.62f, ALIGN_CENTER, sub);
+	if(devices[DEVICE_CUR] != NULL) {
+		sprintf(fbTextBuffer, "Current device: %s", devices[DEVICE_CUR]->deviceName);
+		drawString(320, 108, fbTextBuffer, 0.6f, ALIGN_CENTER, sub);
+	}
+	drawString(320, 452, swissSettings.recentListLevel > 0
+		? "\213\233 Select      (A) Open      (B) Back      (Start) Recent"
+		: "\213\233 Select      (A) Open      (B) Back", 0.55f, ALIGN_CENTER, sub);
+}
+
+// Hint bar shown along the bottom while browsing files
+static void drawBrowserDock(float alpha) {
+	GXColor sub = (GXColor) {190,180,255,(u8)(230*alpha)};
+	Scene3D_DrawGradientRect(0, 424, 640, 56, (GXColor) {8,6,26,(u8)(40*alpha)}, (GXColor) {8,6,26,(u8)(215*alpha)});
+	Scene3D_DrawGradientRect(24, 425, 592, 1, (GXColor) {150,140,255,(u8)(160*alpha)}, (GXColor) {150,140,255,(u8)(160*alpha)});
+	sprintf(fbTextBuffer, "(A) Open    (B) Home Menu    (X) Parent Folder%s%s",
+		swissSettings.enableFileManagement ? "    (Z) Manage" : "",
+		swissSettings.recentListLevel > 0 ? "    (Start) Recent" : "");
+	drawString(320, 452, fbTextBuffer, 0.55f, ALIGN_CENTER, sub);
+}
+
+// Internal
+static void _DrawMenuButtons(uiDrawObj_t *evt) {
+	drawMenuButtonsEvent_t *data = (drawMenuButtonsEvent_t*)evt->data;
+	float dt = Scene3D_FrameDelta();
+
+	// Ease towards the home menu / file browser and the selected entry
+	float target = data->selection >= 0 ? 1.0f : 0.0f;
+	homeBlend += (target - homeBlend) * MIN(1.0f, dt*9.0f);
+	if(fabsf(target - homeBlend) < 0.002f) homeBlend = target;
+	if(data->selection >= 0) {
+		float diff = data->selection - ringPos;
+		while(diff >  MENU_MAX/2.0f) diff -= MENU_MAX;
+		while(diff < -MENU_MAX/2.0f) diff += MENU_MAX;
+		ringPos += diff * MIN(1.0f, dt*10.0f);
+		if(ringPos < 0.0f) ringPos += MENU_MAX;
+		if(ringPos >= MENU_MAX) ringPos -= MENU_MAX;
+	}
+
+	if(homeBlend < 0.99f) {
+		drawBrowserDock(1.0f - homeBlend);
+	}
+	if(homeBlend > 0.01f) {
+		drawHomeMenu(data->selection);
+	}
 }
 
 // External
@@ -1575,6 +1664,24 @@ uiDrawObj_t* DrawMenuButtons(int selection)
 	event->type = EV_MENUBUTTONS;
 	event->data = eventData;
 	return event;
+}
+
+// External
+// Container for the file browser, it recedes into the scene while the home menu is open
+uiDrawObj_t* DrawFilePanel()
+{
+	uiDrawObj_t *event = DrawContainer();
+	DrawSetAnimation(event, UI_ANIM_FILEPANEL, 320, 260);
+	return event;
+}
+
+// External
+void DrawSetAnimation(uiDrawObj_t *evt, int anim, float cx, float cy)
+{
+	evt->anim = anim;
+	evt->cx = cx;
+	evt->cy = cy;
+	evt->born = gettime();
 }
 
 void DrawUpdateProgressBar(uiDrawObj_t *evt, int percent) {
@@ -1617,9 +1724,9 @@ static void _DrawVertScrollBar(uiDrawObj_t *evt) {
 	if(scrollStartY > y2-3-data->scrollHeight)
 		scrollStartY = y2-3-data->scrollHeight;
 	
-	GXColor fillColor = (GXColor) {46,57,104,GUI_MSGBOX_ALPHA}; 	//bluish
-  	GXColor noColor = (GXColor) {0,0,0,0}; //blank
-	GXColor borderColor = (GXColor) {200,200,200,GUI_MSGBOX_ALPHA}; //silver
+	GXColor fillColor = THEME_SELECT;
+	GXColor noColor = (GXColor) {0,0,0,0}; //blank
+	GXColor borderColor = THEME_BORDER_DIM;
 	
 	_DrawSimpleBox( x1, y1, x2-x1, y2-y1, 0, noColor, borderColor);
 	
@@ -2106,8 +2213,59 @@ void DrawGetTextEntry(int mode, const char *label, void *src, int size) {
 }
 
 
+static float easeOutBack(float t) {
+	const float c1 = 1.70158f, c3 = c1 + 1.0f;
+	t -= 1.0f;
+	return 1.0f + c3*t*t*t + c1*t*t;
+}
+
+// Multiply a transform onto the current UI transform
+static void composeTransform(Mtx local, bool perspective) {
+	Mtx cur, out;
+	bool curPerspective;
+	UI_GetTransform(cur, &curPerspective);
+	guMtxConcat(cur, local, out);
+	UI_SetTransform(out, curPerspective || perspective);
+}
+
 static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 	//print_debug("Draw event: %08X (type %s)\n", (u32)videoEvent, typeStrings[videoEvent->type]);
+	Mtx base, chain, local;
+	bool basePerspective, chainPerspective;
+	UI_GetTransform(base, &basePerspective);
+
+	// Animations that also apply to the rest of the chain (labels of a message box etc.)
+	switch(videoEvent->anim) {
+		case UI_ANIM_POP: {
+			float t = videoEvent->born ? (float)ticks_to_millisecs(gettime() - videoEvent->born) / 220.0f : 1.0f;
+			if(t < 1.0f) {
+				float e = easeOutBack(t);
+				UI_MakeTransform(local, videoEvent->cx, videoEvent->cy, 0.0f, 0.0f, -220.0f*(1.0f-e), 0.0f, 0.3f*(1.0f-e), 0.9f+0.1f*e);
+				composeTransform(local, true);
+			}
+			break;
+		}
+		case UI_ANIM_FILEPANEL:
+			if(homeBlend > 0.5f) {
+				return;	// Hidden behind the home menu
+			}
+			if(homeBlend > 0.001f) {
+				UI_MakeTransform(local, 320.0f, 260.0f, 0.0f, 0.0f, -700.0f*homeBlend, 0.0f, 0.0f, 1.0f);
+				composeTransform(local, true);
+			}
+			break;
+	}
+	UI_GetTransform(chain, &chainPerspective);
+
+	// Transforms that only apply to this object
+	if(videoEvent->hasXform) {
+		composeTransform(videoEvent->xform, true);
+	}
+	else if(videoEvent->anim == UI_ANIM_SWAY) {
+		UI_MakeTransform(local, videoEvent->cx, videoEvent->cy, 0.0f, 0.0f, 0.0f, sinf(Scene3D_Time()*1.3f)*0.35f, 0.0f, 1.0f);
+		composeTransform(local, true);
+	}
+
 	drawInit();
 	switch(videoEvent->type) {
 		case EV_TEXOBJ:
@@ -2149,12 +2307,17 @@ static void videoDrawEvent(uiDrawObj_t *videoEvent) {
 		case EV_TITLEBAR:
 			_DrawTitleBar(videoEvent);
 			break;
+		case EV_SCENE3D:
+			_DrawScene3D(videoEvent);
+			break;
 		default:
 			break;
 	}
+	UI_SetTransform(chain, chainPerspective);
 	if(videoEvent->child != NULL) {
 		videoDrawEvent(videoEvent->child);
 	}
+	UI_SetTransform(base, basePerspective);
 }
 
 static void markDisposed(uiDrawObj_t *evt)
@@ -2199,6 +2362,7 @@ static void *videoUpdate(void *videoEventQueue) {
 			videoEventQueueEntry = videoEventQueueEntry->next;
 		}
 		
+		Scene3D_NewFrame();
 		GXRModeObj *vmode = getVideoMode();
 		if(vmode->field_rendering) {
 			GX_SetViewportJitter(0.0f, 0.0f, vmode->fbWidth, vmode->efbHeight, 0.0f, 1.0f, VIDEO_GetNextField());
@@ -2207,6 +2371,7 @@ static void *videoUpdate(void *videoEventQueue) {
 		videoEventQueueEntry = (uiDrawObjQueue_t*)videoEventQueue;
 		while(videoEventQueueEntry != NULL) {
 			uiDrawObj_t *videoEvent = videoEventQueueEntry->event;
+			UI_ResetTransform();
 			videoDrawEvent(videoEvent);
 			videoEventQueueEntry = videoEventQueueEntry->next;
 		}
@@ -2256,6 +2421,10 @@ uiDrawObj_t* DrawRepublish(uiDrawObj_t *old, uiDrawObj_t *new)
 {
 	LWP_MutexLock(_videomutex);
 	if (old) {
+		// Replacing a dialog with an updated one shouldn't replay its entrance
+		if (old->anim == UI_ANIM_POP && new->anim == UI_ANIM_POP) {
+			new->born = old->born;
+		}
 		old->disposed = true;
 	}
 	uiDrawObj_t* event = addVideoEvent(new);
@@ -2275,9 +2444,10 @@ void DrawInit(GXRModeObj *videoMode, bool black) {
 	padsInit();
 	init_font();
 	init_textures();
+	Scene3D_Init();
 	uiDrawObj_t *container = DrawContainer();
 	if(!black) {
-		DrawAddChild(container, DrawImage(TEX_BACKDROP, 0, 0, 640, 480, 0, 0.0f, 1.0f, 0.0f, 1.0f, 0));
+		DrawAddChild(container, DrawScene3D());
 		DrawAddChild(container, DrawTitleBar());
 		buttonPanel = DrawMenuButtons(MENU_NOSELECT);
 		DrawAddChild(container, buttonPanel);
@@ -2347,6 +2517,7 @@ void DrawLoadBackdrop(DEVICEHANDLER_INTERFACE *device) {
 					break;
 			}
 			GX_InitTexObjUserData(&backdropIndTexObj, NULL);
+			customBackdrop = true;
 		}
 		else {
 			TPL_CloseTPLFile(&backdropTPL);

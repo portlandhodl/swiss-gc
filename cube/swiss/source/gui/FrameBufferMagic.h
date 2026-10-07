@@ -40,11 +40,22 @@
 #include "buttons_tpl.h"
 #include "buttons.h"
 
+// Animations applied by the video thread when drawing an object
+#define UI_ANIM_NONE      0
+#define UI_ANIM_POP       1	// zoom in from depth when first shown (applies to its children)
+#define UI_ANIM_SWAY      2	// gentle 3D rocking about its centre (this object only)
+#define UI_ANIM_FILEPANEL 3	// recedes while the home menu is open (applies to its children)
+
 typedef struct uiDrawObj {
     int type;
 	void *data;
 	struct uiDrawObj *child;
 	bool disposed;
+	int anim;
+	u64 born;
+	float cx, cy;		// animation pivot
+	bool hasXform;		// static 3D transform for this object only
+	Mtx xform;
 } uiDrawObj_t;
 
 enum TextureId
@@ -121,6 +132,9 @@ uiDrawObj_t* DrawDynamicLabel(int x, int y, const char *(*getString)(void), floa
 uiDrawObj_t* DrawMenuButtons(int selection);
 uiDrawObj_t* DrawTooltip(const char *tooltip);
 uiDrawObj_t* DrawTitleBar();
+uiDrawObj_t* DrawScene3D();
+uiDrawObj_t* DrawFilePanel();
+void DrawSetAnimation(uiDrawObj_t *evt, int anim, float cx, float cy);
 void DrawUpdateProgressBar(uiDrawObj_t *evt, int percent);
 void DrawUpdateProgressBarDetail(uiDrawObj_t *evt, int percent, int speed, int timestart, int timeremain);
 void DrawUpdateProgressLoading(uiDrawObj_t *evt, int increment);

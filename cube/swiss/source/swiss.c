@@ -319,7 +319,7 @@ uiDrawObj_t* renderFileBrowser(file_handle** directory, int num_files, uiDrawObj
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
-		uiDrawObj_t *newPanel = DrawContainer();
+		uiDrawObj_t *newPanel = DrawFilePanel();
 		drawFiles(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
@@ -468,6 +468,17 @@ void drawCurrentDeviceCarousel(uiDrawObj_t *containerPanel) {
 	DrawAddChild(containerPanel, devInfoLabel);
 }
 
+static void drawCarouselCard(file_handle** directory, int i, int x1, int y1, int x2, int y2, uiDrawObj_t *containerPanel) {
+	lockFile(directory[i]);
+	populate_meta(directory[i]);
+	uiDrawObj_t *browserObject = DrawFileCarouselEntry(x1, y1, x2, y2,
+							getRelativePath(directory[i]->name, curDir.name),
+							directory[i], i - curSelection);
+	directory[i]->uiObj = browserObject;
+	unlockFile(directory[i]);
+	DrawAddChild(containerPanel, browserObject);
+}
+
 // Draws all the files in the current dir.
 void drawFilesCarousel(file_handle** directory, int num_files, uiDrawObj_t *containerPanel) {
 	int i = 0;
@@ -490,51 +501,20 @@ void drawFilesCarousel(file_handle** directory, int num_files, uiDrawObj_t *cont
 		
 		bool parentLink = (directory[curSelection]->fileType==IS_SPECIAL);
 		int y_base = 105; // top most point
-		int sub_entry_width = 40;
-		int sub_entry_height = 270;
-		int main_entry_width = 320;
-		int main_entry_height = parentLink ? 40 : 280;
-		int left_x_base = ((getVideoMode()->fbWidth / 2) - (main_entry_width / 2));  // left x entry
-		int right_x_base = ((getVideoMode()->fbWidth / 2) + (main_entry_width / 2));  // right x entry
+		int card_width = 320;
+		int card_height = 280;
+		int card_x1 = (getVideoMode()->fbWidth / 2) - (card_width / 2);
+		int card_x2 = (getVideoMode()->fbWidth / 2) + (card_width / 2);
 		
-		uiDrawObj_t *browserObject = NULL;
-		// TODO scale and position based on how far from the middle these are (banner and text too)
-		// Left spineart entries
+		// Cards beside the middle one are turned in 3D (see DrawFileCarouselEntry),
+		// draw the furthest ones first so the nearer cards overlap them
 		for(i = current_view_start; i < curSelection; i++) {
-			lockFile(directory[i]);
-			populate_meta(directory[i]);
-			browserObject = DrawFileCarouselEntry(left_x_base + ((sub_entry_width*(i-curSelection))), y_base + 10,
-									left_x_base + ((sub_entry_width*(i-curSelection))+sub_entry_width), y_base + 10 + sub_entry_height,
-									getRelativePath(directory[i]->name, curDir.name),
-									directory[i], i - curSelection);
-			directory[i]->uiObj = browserObject;
-			unlockFile(directory[i]);
-			DrawAddChild(containerPanel, browserObject);
+			drawCarouselCard(directory, i, card_x1, y_base + 10, card_x2, y_base + 10 + card_height, containerPanel);
 		}
-		
-		// Main entry
-		lockFile(directory[curSelection]);
-		populate_meta(directory[curSelection]);
-		browserObject = DrawFileCarouselEntry(((getVideoMode()->fbWidth / 2) - (main_entry_width / 2)), y_base,
-								((getVideoMode()->fbWidth / 2) + (main_entry_width / 2)), y_base + main_entry_height,
-								getRelativePath(directory[curSelection]->name, curDir.name),
-								directory[curSelection], 0);
-		directory[curSelection]->uiObj = browserObject;
-		unlockFile(directory[curSelection]);
-		DrawAddChild(containerPanel, browserObject);
-		
-		// Right spineart entries
-		for(i = curSelection+1; i < current_view_end; i++) {
-			lockFile(directory[i]);
-			populate_meta(directory[i]);
-			browserObject = DrawFileCarouselEntry(right_x_base + ((sub_entry_width*(i-curSelection-1))), y_base + 10,
-									right_x_base + ((sub_entry_width*(i-curSelection-1))+sub_entry_width), y_base + 10 + sub_entry_height,
-									getRelativePath(directory[i]->name, curDir.name),
-									directory[i], i - curSelection);
-			directory[i]->uiObj = browserObject;
-			unlockFile(directory[i]);
-			DrawAddChild(containerPanel, browserObject);
+		for(i = current_view_end - 1; i > curSelection; i--) {
+			drawCarouselCard(directory, i, card_x1, y_base + 10, card_x2, y_base + 10 + card_height, containerPanel);
 		}
+		drawCarouselCard(directory, curSelection, card_x1, y_base, card_x2, y_base + (parentLink ? 40 : card_height), containerPanel);
 	}
 }
 
@@ -556,7 +536,7 @@ uiDrawObj_t* renderFileCarousel(file_handle** directory, int num_files, uiDrawOb
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
-		uiDrawObj_t *newPanel = DrawContainer();
+		uiDrawObj_t *newPanel = DrawFilePanel();
 		drawFilesCarousel(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
@@ -732,7 +712,7 @@ uiDrawObj_t* renderFileFullwidth(file_handle** directory, int num_files, uiDrawO
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
-		uiDrawObj_t *newPanel = DrawContainer();
+		uiDrawObj_t *newPanel = DrawFilePanel();
 		drawFilesFullwidth(directory, num_files, newPanel);
 		filePanel = DrawRepublish(filePanel, newPanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
@@ -2713,6 +2693,7 @@ void select_device(int type)
 
 		textureImage *devImage = &allDevices[curDevice]->deviceTexture;
 		uiDrawObj_t *deviceImage = DrawImage(devImage->textureId, 640/2, 270-(devImage->realHeight/2), devImage->realWidth, devImage->realHeight, 0, 0.0f, 1.0f, 0.0f, 1.0f, 1);
+		DrawSetAnimation(deviceImage, UI_ANIM_SWAY, 640/2, 270);
 		uiDrawObj_t *deviceNameLabel = DrawStyledLabel(640/2, 330, (char*)allDevices[curDevice]->deviceName, 0.85f, ALIGN_CENTER, defaultColor);
 		uiDrawObj_t *deviceDescLabel = DrawStyledLabel(640/2, 350, (char*)allDevices[curDevice]->deviceDescription, 0.65f, ALIGN_CENTER, defaultColor);
 		DrawAddChild(deviceSelectBox, deviceImage);
