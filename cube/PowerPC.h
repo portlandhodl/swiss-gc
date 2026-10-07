@@ -836,50 +836,43 @@ typedef unsigned int PowerPC_instr;
 	  PPC_SET_AA    (ppc, (aa)); \
 	  PPC_SET_LK    (ppc, (lk)); }
 
+/* BO=0x4 (0b00100): branch if CR bit is 0; BO=0x0c (0b01100): branch if CR bit is 1 */
 #define GEN_BNU(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 0 */ \
 	/* BI: Check UN bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0x4, (((cr)<<2)+3))
 
 #define GEN_BUN(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 1 */ \
 	/* BI: Check UN bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0xc, (((cr)<<2)+3))
 
 #define GEN_BNE(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 0 */ \
 	/* BI: Check EQ bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0x4, (((cr)<<2)+2))
 
 #define GEN_BEQ(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 1 */ \
 	/* BI: Check EQ bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0xc, (((cr)<<2)+2))
 
 #define GEN_BGT(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 1 */ \
 	/* BI: Check GT bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0xc, (((cr)<<2)+1))
 
 #define GEN_BLE(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 0 */ \
 	/* BI: Check GT bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0x4, (((cr)<<2)+1))
 
 #define GEN_BGE(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 0 */ \
 	/* BI: Check LT bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0x4, (((cr)<<2)+0))
 
 #define GEN_BLT(ppc,cr,dst,aa,lk) \
-	/* FIXME: The docs didn't seem consistant on the BO */ \
 	/* BO: Branch if CR bit is 1 */ \
 	/* BI: Check LT bit in CR specified */ \
 	GEN_BC(ppc, dst, aa, lk, 0xc, (((cr)<<2)+0))

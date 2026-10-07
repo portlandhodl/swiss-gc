@@ -215,7 +215,7 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 
 	/** Advanced Settings (Page 2/) */
 	// Enable USB Gecko Debug via Slot B [Yes/No]
-	// Hide Unknown file types [Yes/No]	// TODO Implement
+	// Hide Unknown file types [Yes/No]
 	// Stop DVD Motor on startup [Yes/No]
 	// Enable WiiRD debugging in Games [Yes/No]
 	// Enable File Management [Yes/No]

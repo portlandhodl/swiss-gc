@@ -2779,7 +2779,9 @@ void select_device(int type)
 					break;
 				else {
 					if(!(allDevices[curDevice]->features & FEAT_WRITE)) {
-						// TODO don't break cause read only device
+						uiDrawObj_t *msgBox = DrawPublish(DrawMessageBox(D_WARN, "This device is read-only.\nPlease select a writable device."));
+						wait_press_A();
+						DrawDispose(msgBox);
 					}
 					else {
 						break;

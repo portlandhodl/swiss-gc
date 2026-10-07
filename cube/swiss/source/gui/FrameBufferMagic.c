@@ -954,7 +954,6 @@ static void _DrawTooltip(uiDrawObj_t *evt) {
 		for (numLines=1; strPtr[numLines]; strPtr[numLines]=='\n' ? numLines++ : *strPtr++);
 		int height = numLines*26;
 		int tooltipY1 = (getVideoMode()->efbHeight / 2) - (height/2);
-		// TODO centre on Y based on total size.
 		int tooltipX1 = 25, tooltipX2 = getVideoMode()->fbWidth-25, tooltipY2 = tooltipY1+height;
 		_DrawSimpleBox( tooltipX1, tooltipY1-6, tooltipX2-tooltipX1, (tooltipY2-tooltipY1)+6, 0, backColorTT, borderColorTT);
 		
@@ -1827,6 +1826,7 @@ void DrawGetTextEntry(int mode, const char *label, void *src, int size) {
 	print_debug("DrawGetTextEntry Modes: Alpha [%s] Numeric [%s] IP [%s] Masked [%s] File [%s]\n", mode & ENTRYMODE_ALPHA ? "Y":"N", mode & ENTRYMODE_NUMERIC ? "Y":"N",
 																	mode & ENTRYMODE_IP ? "Y":"N", mode & ENTRYMODE_MASKED ? "Y":"N", mode & ENTRYMODE_FILE ? "Y":"N");
 	char *text = calloc(1, size + 1);
+	char *masked = calloc(1, size + 1);
 	if(mode & (ENTRYMODE_ALPHA|ENTRYMODE_IP)) {
 		strncpy(text, src, size);
 	}
@@ -1973,9 +1973,15 @@ void DrawGetTextEntry(int mode, const char *label, void *src, int size) {
 		sprintf(txtbuffer, "%s - Please enter a value", label);
 		DrawAddChild(newPanel, DrawStyledLabel(25, 74, txtbuffer, GetTextScaleToFitInWidth(txtbuffer, getVideoMode()->fbWidth-50), ALIGN_LEFT, defaultColor));
 
-		// Draw the text entry box (TODO: mask chars if the mode says to do so)
+		// Draw the text entry box
+		char *displayText = text;
+		if(mode & ENTRYMODE_MASKED) {
+			displayText = masked;
+			memset(masked, '*', strlen(text));
+			masked[strlen(text)] = '\0';
+		}
 		DrawAddChild(newPanel, DrawEmptyBox(40, 100, getVideoMode()->fbWidth-40, 140));
-		DrawAddChild(newPanel, DrawStyledLabelWithCaret(320, 120, text, GetTextScaleToFitInWidth(text, getVideoMode()->fbWidth-90), ALIGN_CENTER, defaultColor, caret));
+		DrawAddChild(newPanel, DrawStyledLabelWithCaret(320, 120, displayText, GetTextScaleToFitInWidth(displayText, getVideoMode()->fbWidth-90), ALIGN_CENTER, defaultColor, caret));
 		DrawAddChild(newPanel, DrawStyledLabel(320, 160, "(L/R) Cursor \267 (Start) Accept \267 (B) Discard", 0.75f, ALIGN_CENTER, defaultColor));
 
 		// Alphanumeric has a little "mode" hint at the bottom (upper/lower case set switching)
@@ -2085,9 +2091,9 @@ void DrawGetTextEntry(int mode, const char *label, void *src, int size) {
 				strcpy(src, text);
 			}
 			else {
-				// TODO fix this stuff at some point, we're checking based on text size rather than max val of the data type.
 				u16 *src_int = (u16*)src;
-				*src_int = (u16)atoi(text);
+				unsigned long val = strtoul(text, NULL, 10);
+				*src_int = val > 0xFFFF ? 0xFFFF : val;
 			}
 			break;
 		}
@@ -2095,6 +2101,7 @@ void DrawGetTextEntry(int mode, const char *label, void *src, int size) {
 			{ VIDEO_WaitVSync (); }
 	}
 	if(text) free(text);
+	if(masked) free(masked);
 	DrawDispose(container);
 }
 
