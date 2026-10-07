@@ -13,6 +13,7 @@
 #include "swiss.h"
 #include "main.h"
 #include "config.h"
+#include "cubeboot.h"
 #include "settings.h"
 #include "bba.h"
 
@@ -202,6 +203,8 @@ int config_update_global(bool checkConfigDevice) {
 	fprintf(fp, "BBAUseDHCP=%s\r\n", swissSettings.bbaUseDhcp ? "Yes":"No");
 	fprintf(fp, "ShowHiddenFiles=%s\r\n", swissSettings.showHiddenFiles ? "Yes":"No");
 	fprintf(fp, "RecentListLevel=%s\r\n", recentListLevelStr[swissSettings.recentListLevel]);
+	fprintf(fp, "GameCube Intro=%s\r\n", swissSettings.cubebootIntro ? "Yes":"No");
+	fprintf(fp, "GameCube Intro Color=%s\r\n", cubebootColorStr[swissSettings.cubebootIntroColor]);
 	fprintf(fp, "GCLoaderHWVersion=%i\r\n", swissSettings.gcloaderHwVersion);
 	fprintf(fp, "GCLoaderTopVersion=%s\r\n", swissSettings.gcloaderTopVersion);
 	fprintf(fp, "Autoload=%s\r\n", swissSettings.autoload);
@@ -1061,6 +1064,17 @@ void config_parse_global(char *configData) {
 					for(int i = 0; i < 3; i++) {
 						if(!strcmp(recentListLevelStr[i], value)) {
 							swissSettings.recentListLevel = i;
+							break;
+						}
+					}
+				}
+				else if(!strcmp("GameCube Intro", name)) {
+					swissSettings.cubebootIntro = !strcmp("Yes", value);
+				}
+				else if(!strcmp("GameCube Intro Color", name)) {
+					for(int i = 0; i < CUBEBOOT_COLOR_MAX; i++) {
+						if(!strcmp(cubebootColorStr[i], value)) {
+							swissSettings.cubebootIntroColor = i;
 							break;
 						}
 					}

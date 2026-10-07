@@ -34,6 +34,11 @@ typedef struct {
 void config_find(ConfigEntry *entry);
 void config_defaults(ConfigEntry *entry);
 int config_update_game(ConfigEntry *entry, ConfigEntry *defaults, bool checkConfigDevice);
+bool config_set_device();
+void config_unset_device();
+char* config_file_read(char* filename);
+int config_file_write(char* filename, char* contents);
+void config_file_delete(char* filename);
 int config_update_global(bool checkConfigDevice);
 int config_update_recent(bool checkConfigDevice);
 int config_init(void (*progress_indicator)(char*, int, int));

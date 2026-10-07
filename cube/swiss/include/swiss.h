@@ -182,6 +182,8 @@ typedef struct {
 	int bs2Boot;
 	int showHiddenFiles;
 	int recentListLevel;	// off, lazy, on
+	int cubebootIntro;
+	int cubebootIntroColor;
 	int gcloaderHwVersion;
 	char gcloaderTopVersion[32];
 	char autoload[PATHNAME_MAX];

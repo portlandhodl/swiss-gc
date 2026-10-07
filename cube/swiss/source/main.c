@@ -38,6 +38,7 @@
 #include "devices/fat/ata.h"
 #include "aram/sidestep.h"
 #include "devices/filemeta.h"
+#include "cubeboot.h"
 
 dvdcmdblk DVDCommandBlock;
 dvdcmdblk DVDInquiryBlock;
@@ -303,7 +304,7 @@ int main(int argc, char *argv[])
 	if(devices[DEVICE_CUR] != NULL) {
 		print_debug("Detected %s\n", devices[DEVICE_CUR]->deviceName);
 		if(!devices[DEVICE_CUR]->init(devices[DEVICE_CUR]->initial)) {
-			if((devices[DEVICE_CUR]->features & FEAT_AUTOLOAD_DOL) && getenv("WIILOAD") == NULL) {
+			if((devices[DEVICE_CUR]->features & FEAT_AUTOLOAD_DOL) && getenv("WIILOAD") == NULL && !cubeboot_intro_launched(argc, argv)) {
 				load_auto_dol(argc, argv);
 			}
 			memcpy(&curDir, devices[DEVICE_CUR]->initial, sizeof(file_handle));

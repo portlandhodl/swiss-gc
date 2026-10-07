@@ -18,6 +18,7 @@
 #include "bba.h"
 #include "sram.h"
 #include "rt4k.h"
+#include "cubeboot.h"
 
 #define page_x_ofs_key (30)
 #define page_x_ofs_val (410)
@@ -82,7 +83,9 @@ static char *tooltips_global[PAGE_GLOBAL_MAX+1] = {
 	[SET_ENABLE_USBGECKO] = "Enable USB Gecko:\n\nIf a USB Gecko is present, messages output to the debug UART\nwill be redirected. When the USB host isn't actively reading from\nthe USB Gecko, it may cause the system to hang.\n\nwiiload is also made available for iterative development.",
 	[SET_WAIT_USBGECKO] = "Wait for USB Gecko:\n\nWait for the transmit buffer to be read by the USB host when full.",
 	[SET_SIMMEMSIZE] = "Simulated MRAM Size:\n\nLimits the amount of memory available on development hardware.",
-	[SET_TAU_CALIB] = "CPU Temperature Calibration:\n\nOn a cold boot, adjust this value so that the CPU temperature\nreading in the title bar is around room temperature.\n\nThere is no factory calibration."
+	[SET_TAU_CALIB] = "CPU Temperature Calibration:\n\nOn a cold boot, adjust this value so that the CPU temperature\nreading in the title bar is around room temperature.\n\nThere is no factory calibration.",
+	[SET_CUBEBOOT_INTRO] = "GameCube Intro:\n\nPlays the original GameCube boot animation before Swiss\nstarts, using cubeboot. The animation is loaded from your\nconsole's own IPL ROM at runtime.\n\nRequires the iplboot layout: Swiss at /ipl.dol and cubeboot\ncopied to /cubeboot.dol on the configuration device.\nApplied on Save & Exit (swaps the two DOLs).",
+	[SET_CUBEBOOT_COLOR] = "GameCube Intro Color:\n\nColor of the cube in the boot animation.\nWritten to cubeboot.ini when the intro is enabled.",
 };
 
 static char *tooltips_interface[PAGE_INTERFACE_MAX+1] = {
@@ -284,6 +287,8 @@ uiDrawObj_t* settings_draw_page(int page_num, int option, ConfigEntry *gameConfi
 			drawSettingEntryString(page, &page_y_ofs, "Simulated MRAM Size:", simulatedMemSizeStr[swissSettings.simulatedMemSize], option == SET_SIMMEMSIZE, true);
 			sprintf(sramTemperatureStr, "%+hi\260C", swissSettings.sramTemperature);
 			drawSettingEntryString(page, &page_y_ofs, "CPU Temperature Calibration:", sramTemperatureStr, option == SET_TAU_CALIB, is_gamecube());
+			drawSettingEntryBoolean(page, &page_y_ofs, "GameCube Intro:", swissSettings.cubebootIntro, option == SET_CUBEBOOT_INTRO, true);
+			drawSettingEntryString(page, &page_y_ofs, "GameCube Intro Color:", cubebootColorStr[swissSettings.cubebootIntroColor], option == SET_CUBEBOOT_COLOR, swissSettings.cubebootIntro);
 		}
 	}
 	else if(page_num == PAGE_INTERFACE) {
@@ -611,6 +616,15 @@ void settings_toggle(int page, int option, int direction, ConfigEntry *gameConfi
 					if(swissSettings.sramTemperature < -80) swissSettings.sramTemperature = -80;
 					if(swissSettings.sramTemperature > +80) swissSettings.sramTemperature = +80;
 					__SYS_SetTAUCalibration(swissSettings.sramTemperature);
+				}
+			break;
+			case SET_CUBEBOOT_INTRO:
+				swissSettings.cubebootIntro ^= 1;
+			break;
+			case SET_CUBEBOOT_COLOR:
+				if(swissSettings.cubebootIntro) {
+					swissSettings.cubebootIntroColor += direction;
+					swissSettings.cubebootIntroColor = (swissSettings.cubebootIntroColor + CUBEBOOT_COLOR_MAX) % CUBEBOOT_COLOR_MAX;
 				}
 			break;
 		}
@@ -1174,6 +1188,18 @@ int show_settings(int page, int option, ConfigEntry *config) {
 				if(config != NULL) {
 					config_defaults(&tempConfig);
 					config_update_game(config, &tempConfig, true);
+				}
+				// Install or uninstall cubeboot if the intro settings changed
+				if(swissSettings.cubebootIntro != tempSettings.cubebootIntro ||
+					(swissSettings.cubebootIntro && swissSettings.cubebootIntroColor != tempSettings.cubebootIntroColor)) {
+					const char *err = cubeboot_intro_apply(swissSettings.cubebootIntro, swissSettings.cubebootIntroColor);
+					if(err) {
+						swissSettings.cubebootIntro = tempSettings.cubebootIntro;
+						swissSettings.cubebootIntroColor = tempSettings.cubebootIntroColor;
+						uiDrawObj_t *errBox = DrawPublish(DrawMessageBox(D_FAIL, err));
+						wait_press_A();
+						DrawDispose(errBox);
+					}
 				}
 				// flush settings to .ini
 				if(config_update_global(true)) {
